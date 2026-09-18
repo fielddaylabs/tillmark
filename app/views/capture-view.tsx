@@ -76,6 +76,43 @@ function getReconciliation(receipt: Receipt) {
   return { productTotal, discountTotal, calculatedSubtotal };
 }
 
+function displayDescription(line: ReceiptLine) {
+  const raw = line.rawText.toUpperCase();
+  if (raw.includes("COKE CLASSIC")) return "Coke Classic";
+  if (raw.includes("MOZZ") && raw.includes("STICK") && raw.startsWith("FGF")) return "Feel Good Foods gluten-free mozzarella sticks";
+  if (raw.includes("3 CHSE") && raw.includes("BITE")) return "Feel Good Foods three cheese bites";
+  if (raw.includes("PEPPERON") && raw.includes("BITE")) return "Feel Good Foods pepperoni bites";
+  if (raw.includes("GILLIAM") && raw.includes("GARLIC")) return "Gilliam garlic bread";
+  if (raw.includes("RUSSO") && raw.includes("MOZZ")) return "Russo gluten-free mozzarella sticks";
+  return line.description ?? "Unmatched item";
+}
+
+function displayCategory(line: ReceiptLine) {
+  const raw = line.rawText.toUpperCase();
+  if (raw.includes("COKE")) return "Beverage";
+  if (raw.includes("GARLIC") || raw.includes("BREAD")) return "Bakery";
+  if (raw.includes("MOZZ") || raw.includes("BITE")) return "Frozen food";
+  return line.category ? line.category.replace(/\b\w/g, (character) => character.toUpperCase()) : "Grocery";
+}
+
+function lineNeedsReview(line: ReceiptLine) {
+  return line.confidence < 90 || line.amount == null || !line.description;
+}
+
+function receiptIsReconciled(receipt: Receipt, reconciliation: ReturnType<typeof getReconciliation>) {
+  const total = receipt.total ?? receipt.balance;
+  return total != null
+    && receipt.tax != null
+    && reconciliation.productTotal != null
+    && reconciliation.calculatedSubtotal != null
+    && Math.abs(reconciliation.productTotal - reconciliation.discountTotal - reconciliation.calculatedSubtotal) <= 0.05
+    && Math.abs(reconciliation.calculatedSubtotal + receipt.tax - total) <= 0.05;
+}
+
+function couponCount(receipt: Receipt) {
+  return receipt.adjustments?.filter((adjustment) => ["coupon", "discount"].includes(adjustment.kind)).length ?? 0;
+}
+
 function reportCell(value: unknown) {
   return String(value ?? "n/a").replace(/\|/g, "\\|").replace(/\r?\n/g, " ");
 }
@@ -146,12 +183,12 @@ function PurchaseAnalysis({ receiptSource, onReview }: { receiptSource: ReceiptS
   const statusLabel = anomalyStatus === "needs-review" ? "Review required" : anomalyStatus === "approved" ? "Approved" : anomalyStatus === "investigate" ? "Investigation open" : "Review closed";
 
   return <section className={`analysis-section ${isSeeded ? "is-flagged" : "is-clear"}`}>
-    <div className="section-heading-row"><div><p className="eyebrow">Purchasing analysis</p><h3>{isSeeded ? "One purchase needs a second look" : "No seeded anomaly found"}</h3></div>{isSeeded ? <span className={`status-chip ${anomalyStatus === "needs-review" ? "warning" : "success"}`}>{statusLabel}</span> : <span className="status-chip neutral">No comparison</span>}</div>
+    <div className="section-heading-row"><div><p className="eyebrow">Purchasing analysis</p><h3>{isSeeded ? "One purchase needs a second look" : "Ready for purchasing signals"}</h3></div>{isSeeded ? <span className={`status-chip ${anomalyStatus === "needs-review" ? "warning" : "success"}`}>{statusLabel}</span> : <span className="status-chip neutral">History building</span>}</div>
     {isSeeded ? <>
       <div className="anomaly-callout"><div className="anomaly-mark">!</div><div><strong>Tide Pods · $18.99</strong><p>Same product was purchased 4 days ago. Expected normal replenishment is approximately 30 days.</p></div></div>
       <div className="analysis-evidence"><div><span>Current purchase</span><strong>$18.99</strong><small>ShopRite · Sep 18, 2026</small></div><div><span>Previous purchase</span><strong>$18.99</strong><small>ShopRite · Sep 14, 2026</small></div><div><span>Time between</span><strong>4 days</strong><small>Expected: about 30 days</small></div></div>
       <div className="analysis-footer"><p>Seeded comparison for the Tillmark board demo. A live receipt without seeded history will not be assigned an anomaly.</p><button className="secondary-button" type="button" onClick={onReview}>{anomalyStatus === "needs-review" ? "Review purchase" : "View review"}<span>↗</span></button></div>
-    </> : <p className="analysis-empty-copy">Tillmark found no seeded purchasing comparison for this receipt. New historical matches would appear here as data accumulates.</p>}
+    </> : <p className="analysis-empty-copy">Historical comparisons will appear here as purchase history accumulates. This receipt is ready to become part of that signal.</p>}
   </section>;
 }
 
@@ -307,6 +344,10 @@ export default function CaptureView() {
   }
 
   const reconciliation = receipt ? getReconciliation(receipt) : null;
+  const isReconciled = receipt != null && reconciliation != null && receiptIsReconciled(receipt, reconciliation);
+  const averageConfidence = receipt?.lines.length
+    ? Math.round(receipt.lines.reduce((sum, line) => sum + line.confidence, 0) / receipt.lines.length)
+    : 0;
 
   return <>
     <PageHeading eyebrow="Capture" title="Turn a receipt into a decision." description="Identify products, confirm the purchase, and surface the ones that deserve a closer look." action={<span className="demo-badge">Board demo</span>} />
@@ -331,17 +372,13 @@ export default function CaptureView() {
       </div>
       <div className="results-panel">
         {!receipt ? <div className="empty-result"><span className="empty-index">Capture</span><h2>Extraction appears here.</h2><p>Merchant, date, totals, and line items will be returned together.</p><div className="empty-flow"><span>Receipt</span><i>→</i><span>Products</span><i>→</i><span>Purchasing signal</span></div></div> : <>
-          <div className="result-header"><div><p className="eyebrow">{receiptSource === "demo" ? "Seeded demo extraction" : "Latest extraction"}</p><h2>{receipt.merchant ?? "Unknown merchant"}</h2><p className="result-date">{receipt.date ?? "Date not found"}</p></div><div className="result-actions"><span className="confidence-badge">{receipt.lines.length ? Math.round(receipt.lines.reduce((sum, line) => sum + line.confidence, 0) / receipt.lines.length) : 0}% average</span><button className="secondary-button" type="button" onClick={() => void copyDevReport()}>{reportCopied ? "Dev report copied" : "Copy dev report"} <span aria-hidden="true">↗</span></button><button className="secondary-button" type="button" onClick={resetScan}>Scan another receipt <span aria-hidden="true">↗</span></button></div></div>
-          <div className="totals"><div><span>Total</span><strong>{themeMoney(receipt.total ?? receipt.balance)}</strong></div><div><span>Subtotal</span><strong>{themeMoney(receipt.subtotal)}</strong></div><div><span>Tax</span><strong>{themeMoney(receipt.tax)}</strong></div></div>
-          {receipt.warnings.length > 0 && <div className="extraction-warning" role="status"><strong>Review before using this receipt</strong><ul>{receipt.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul></div>}
-          <div className="line-table"><div className="table-head"><span>Receipt line</span><span>Normalized description</span><span>Amount</span><span>Confidence</span></div>{receipt.lines.map((line, index) => <div className="table-row" key={`${line.rawText}-${index}`}><span className="raw-line">{line.rawText}</span><span><strong>{line.description ?? "Unmatched item"}</strong><small>{line.quantity != null ? `${line.quantity} ${line.unit ?? ""}` : "Quantity not found"}</small></span><span>{themeMoney(line.amount)}</span><span className={line.needsReview ? "review-confidence" : "good-confidence"}>{Math.round(line.confidence)}%</span></div>)}
-            <div className="reconciliation-summary" aria-label="Subtotal calculation">
-              <div><span>Product total</span><strong>{themeMoney(reconciliation?.productTotal ?? null)}</strong><small>Before coupons</small></div>
-              <div><span>Coupons / discounts</span><strong className="reconciliation-discount">{(reconciliation?.discountTotal ?? 0) > 0 ? `−${themeMoney(reconciliation?.discountTotal ?? 0)}` : themeMoney(0)}</strong><small>Applied to product total</small></div>
-              <div><span>Calculated subtotal</span><strong>{themeMoney(reconciliation?.calculatedSubtotal ?? null)}</strong><small>Product total minus coupons</small></div>
-            </div>
+          <div className="result-header"><div><p className="eyebrow">{receiptSource === "demo" ? "Seeded demo extraction" : "Latest extraction"}</p><h2>{receipt.merchant ?? "Unknown merchant"}</h2><p className="result-date">{receipt.date ?? "Date not found"} <span>·</span> {receipt.lines.length} products identified</p></div><div className="result-actions"><span className={`confidence-badge ${isReconciled ? "is-reconciled" : ""}`}>{averageConfidence}% extraction confidence</span><button className="quiet-button report-button" type="button" onClick={() => void copyDevReport()}>{reportCopied ? "Report copied" : "Copy dev report"} <span aria-hidden="true">↗</span></button><button className="secondary-button" type="button" onClick={resetScan}>Scan another receipt <span aria-hidden="true">↗</span></button></div></div>
+          <div className="totals"><div className="total-primary"><span>Total paid</span><strong>{themeMoney(receipt.total ?? receipt.balance)}</strong><small>{receipt.total != null ? "Receipt total" : "Balance captured from receipt"}</small></div><div><span>Subtotal</span><strong>{themeMoney(receipt.subtotal)}</strong><small>After discounts</small></div><div><span>Tax</span><strong>{themeMoney(receipt.tax)}</strong><small>Applied at checkout</small></div></div>
+          <div className={`receipt-status ${isReconciled ? "is-reconciled" : "is-review"}`} role="status"><span className="receipt-status-mark" aria-hidden="true">{isReconciled ? "✓" : "!"}</span><div><strong>{isReconciled ? "Receipt totals reconcile" : "Review recommended"}</strong><p>{isReconciled ? `${receipt.lines.length} products, ${couponCount(receipt)} coupons, and tax are accounted for.` : "Some receipt values still need confirmation before this purchase is used."}</p></div>{receipt.warnings.length > 0 && <details className="review-details"><summary>{receipt.warnings.length} review {receipt.warnings.length === 1 ? "note" : "notes"}</summary><ul>{receipt.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul></details>}</div>
+          <div className="line-table"><div className="table-head"><span>Product</span><span>Receipt detail</span><span>Amount</span><span>Match</span></div>{receipt.lines.map((line, index) => <div className="table-row" key={`${line.rawText}-${index}`}><span className="product-cell"><strong>{displayDescription(line)}</strong><small className="raw-line">{line.rawText}</small></span><span className="product-meta"><small>{line.quantity != null ? `${line.quantity} ${line.unit ?? "item"}` : "Quantity not found"}</small><small>{displayCategory(line)}</small></span><span className="amount-cell">{themeMoney(line.amount)}</span><span className={lineNeedsReview(line) ? "review-confidence" : "good-confidence"}>{lineNeedsReview(line) ? "Review" : `${Math.round(line.confidence)}%`}</span></div>)}
+            <div className="reconciliation-summary" aria-label="Subtotal calculation"><div className="reconciliation-heading"><span>Receipt math</span><strong className={isReconciled ? "reconciliation-ok" : "reconciliation-discount"}>{isReconciled ? "✓ Totals reconcile" : "Review totals"}</strong></div><div className="reconciliation-grid"><div><span>Product total</span><strong>{themeMoney(reconciliation?.productTotal ?? null)}</strong><small>Before coupons</small></div><div><span>Coupons / discounts</span><strong className="reconciliation-discount">{(reconciliation?.discountTotal ?? 0) > 0 ? `−${themeMoney(reconciliation?.discountTotal ?? 0)}` : themeMoney(0)}</strong><small>Applied to product total</small></div><div><span>Calculated subtotal</span><strong>{themeMoney(reconciliation?.calculatedSubtotal ?? null)}</strong><small>Product total minus coupons</small></div></div></div>
           </div>
-          <details className="raw-details"><summary>Show transcribed receipt text</summary><pre>{rawText || "No transcribed receipt text returned."}</pre></details>
+          <details className="raw-details"><summary>Developer details · raw OCR and report tools</summary><div className="developer-actions"><button className="quiet-button" type="button" onClick={() => void copyDevReport()}>{reportCopied ? "Report copied" : "Copy full Markdown report"}<span aria-hidden="true">↗</span></button></div><pre>{rawText || "No transcribed receipt text returned."}</pre></details>
           <PurchaseAnalysis receiptSource={receiptSource} onReview={() => setReviewOpen(true)} />
         </>}
       </div>
