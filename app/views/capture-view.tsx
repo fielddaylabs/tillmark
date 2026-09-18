@@ -17,6 +17,12 @@ type ReceiptLine = {
   needsReview: boolean;
 };
 
+type ReceiptAdjustment = {
+  rawText: string;
+  kind: string;
+  amount: number | null;
+};
+
 type Receipt = {
   merchant: string | null;
   date: string | null;
@@ -26,6 +32,7 @@ type Receipt = {
   total: number | null;
   balance: number | null;
   lines: ReceiptLine[];
+  adjustments?: ReceiptAdjustment[];
   warnings: string[];
   reconciliation?: {
     productTotal: number | null;
@@ -62,6 +69,77 @@ const sumLineAmounts = (lines: ReceiptLine[]) => {
   return amounts.length ? Math.round(amounts.reduce((sum, amount) => sum + amount, 0) * 100) / 100 : null;
 };
 
+function getReconciliation(receipt: Receipt) {
+  const productTotal = receipt.reconciliation?.productTotal ?? sumLineAmounts(receipt.lines);
+  const discountTotal = receipt.reconciliation?.discountTotal ?? 0;
+  const calculatedSubtotal = receipt.reconciliation?.calculatedSubtotal ?? (productTotal == null ? null : Math.round((productTotal - discountTotal) * 100) / 100);
+  return { productTotal, discountTotal, calculatedSubtotal };
+}
+
+function reportCell(value: unknown) {
+  return String(value ?? "n/a").replace(/\|/g, "\\|").replace(/\r?\n/g, " ");
+}
+
+function reportMoney(value: number | null) {
+  return value == null ? "n/a" : themeMoney(value);
+}
+
+function buildDevReport(receipt: Receipt, rawText: string, receiptSource: ReceiptSource, file: File | null) {
+  const reconciliation = getReconciliation(receipt);
+  const resultPayload = { ...receipt, ocrText: rawText, adjustments: receipt.adjustments ?? [] };
+  const fileContext = file ? `${file.name} (${file.type || "unknown type"}, ${file.size} bytes, last modified ${file.lastModified ? new Date(file.lastModified).toISOString() : "unknown"})` : "none";
+  const adjustmentRows = (receipt.adjustments ?? []).map((adjustment, index) => `| ${index + 1} | ${reportCell(adjustment.kind)} | ${reportCell(adjustment.rawText)} | ${reportMoney(adjustment.amount)} |`);
+  const lineRows = receipt.lines.map((line, index) => `| ${index + 1} | ${reportCell(line.rawText)} | ${reportCell(line.description)} | ${reportCell(line.quantity)} | ${reportCell(line.unit)} | ${reportMoney(line.unitPrice)} | ${reportMoney(line.amount)} | ${reportCell(line.category)} | ${Math.round(line.confidence)}% | ${line.needsReview ? "yes" : "no"} |`);
+
+  return [
+    "# Tillmark receipt extraction dev report",
+    "",
+    "## Context",
+    `- Generated: ${new Date().toISOString()}`,
+    `- Source: ${receiptSource}`,
+    `- File: ${fileContext}`,
+    `- Page: ${window.location.pathname}`,
+    `- Browser: ${navigator.userAgent}`,
+    "",
+    "## Summary",
+    `- Merchant: ${reportCell(receipt.merchant)}`,
+    `- Date: ${reportCell(receipt.date)}`,
+    `- Currency: ${reportCell(receipt.currency)}`,
+    `- Total: ${reportMoney(receipt.total ?? receipt.balance)}`,
+    `- Reported subtotal: ${reportMoney(receipt.subtotal)}`,
+    `- Tax: ${reportMoney(receipt.tax)}`,
+    `- Balance: ${reportMoney(receipt.balance)}`,
+    "",
+    "## Reconciliation",
+    `- Product total before coupons: ${reportMoney(reconciliation.productTotal)}`,
+    `- Coupons / discounts applied: ${reportMoney(reconciliation.discountTotal)}`,
+    `- Calculated subtotal: ${reportMoney(reconciliation.calculatedSubtotal)}`,
+    "",
+    "## Warnings",
+    ...(receipt.warnings.length ? receipt.warnings.map((warning) => `- ${warning}`) : ["- None"]),
+    "",
+    "## Adjustments",
+    "| # | Kind | Raw text | Amount |",
+    "| ---: | --- | --- | ---: |",
+    ...(adjustmentRows.length ? adjustmentRows : ["| | None | | |"]),
+    "",
+    "## Line items",
+    "| # | Receipt line | Description | Qty | Unit | Unit price | Amount | Category | Confidence | Review |",
+    "| ---: | --- | --- | ---: | --- | ---: | ---: | --- | ---: | --- |",
+    ...(lineRows.length ? lineRows : ["| | None | | | | | | | | |"]),
+    "",
+    "## Transcribed receipt text",
+    "~~~text",
+    rawText || "No transcribed receipt text returned.",
+    "~~~",
+    "",
+    "## Full result payload",
+    "~~~json",
+    JSON.stringify(resultPayload, null, 2),
+    "~~~",
+  ].join("\n");
+}
+
 function PurchaseAnalysis({ receiptSource, onReview }: { receiptSource: ReceiptSource; onReview: () => void }) {
   const { anomalyStatus } = useDemoState();
   const isSeeded = receiptSource === "demo";
@@ -86,6 +164,7 @@ export default function CaptureView() {
   const [status, setStatus] = useState("Ready for a receipt photo");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [reportCopied, setReportCopied] = useState(false);
   const [cameraState, setCameraState] = useState<"checking" | "ready" | "unsupported" | "denied">("checking");
   const [reviewOpen, setReviewOpen] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -124,6 +203,7 @@ export default function CaptureView() {
     setError(null);
     setReceipt(null);
     setReceiptSource(source);
+    setReportCopied(false);
     setFile(nextFile);
     setPreview(URL.createObjectURL(nextFile));
     setStatus("Ready to extract");
@@ -134,6 +214,7 @@ export default function CaptureView() {
     setPreview(null);
     setReceipt(demoReceipt);
     setReceiptSource("demo");
+    setReportCopied(false);
     setRawText(demoReceipt.lines.map((line) => line.rawText).join("\n"));
     setError(null);
     setStatus("Demo receipt loaded");
@@ -144,6 +225,7 @@ export default function CaptureView() {
     setFile(null);
     setPreview(null);
     setReceipt(null);
+    setReportCopied(false);
     setRawText("");
     setError(null);
     setReceiptSource("upload");
@@ -160,7 +242,7 @@ export default function CaptureView() {
     chooseFile(event.dataTransfer.files?.[0]);
   }
 
-  async function extractFile(receiptFile: File) {
+  async function extractFile(receiptFile: File, source: ReceiptSource = "upload") {
     setBusy(true);
     setError(null);
     setReceipt(null);
@@ -172,7 +254,7 @@ export default function CaptureView() {
       const payload = (await response.json()) as { receipt?: Receipt; rawText?: string; error?: string };
       if (!response.ok || !payload.receipt) throw new Error(payload.error ?? "Receipt extraction failed.");
       setReceipt(payload.receipt);
-      setReceiptSource("upload");
+      setReceiptSource(source);
       setRawText(payload.rawText ?? "");
       setStatus("Extraction complete");
     } catch (caught) {
@@ -180,6 +262,32 @@ export default function CaptureView() {
       setStatus("Could not extract receipt");
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function copyDevReport() {
+    if (!receipt) return;
+    const report = buildDevReport(receipt, rawText, receiptSource, file);
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(report);
+      } else {
+        const textarea = document.createElement("textarea");
+        textarea.value = report;
+        textarea.setAttribute("readonly", "true");
+        textarea.style.position = "fixed";
+        textarea.style.opacity = "0";
+        document.body.appendChild(textarea);
+        textarea.select();
+        const copied = document.execCommand("copy");
+        textarea.remove();
+        if (!copied) throw new Error("Clipboard access is unavailable.");
+      }
+      setReportCopied(true);
+      setStatus("Dev report copied to clipboard");
+      window.setTimeout(() => setReportCopied(false), 2500);
+    } catch {
+      setError("Could not copy the dev report. Check clipboard permissions and try again.");
     }
   }
 
@@ -194,9 +302,11 @@ export default function CaptureView() {
       if (!blob) return;
       const captured = new File([blob], "camera-receipt.jpg", { type: "image/jpeg" });
       chooseFile(captured, "camera");
-      void extractFile(captured);
+      void extractFile(captured, "camera");
     }, "image/jpeg", 0.92);
   }
+
+  const reconciliation = receipt ? getReconciliation(receipt) : null;
 
   return <>
     <PageHeading eyebrow="Capture" title="Turn a receipt into a decision." description="Identify products, confirm the purchase, and surface the ones that deserve a closer look." action={<span className="demo-badge">Board demo</span>} />
@@ -221,20 +331,15 @@ export default function CaptureView() {
       </div>
       <div className="results-panel">
         {!receipt ? <div className="empty-result"><span className="empty-index">Capture</span><h2>Extraction appears here.</h2><p>Merchant, date, totals, and line items will be returned together.</p><div className="empty-flow"><span>Receipt</span><i>→</i><span>Products</span><i>→</i><span>Purchasing signal</span></div></div> : <>
-          <div className="result-header"><div><p className="eyebrow">{receiptSource === "demo" ? "Seeded demo extraction" : "Latest extraction"}</p><h2>{receipt.merchant ?? "Unknown merchant"}</h2><p className="result-date">{receipt.date ?? "Date not found"}</p></div><div className="result-actions"><span className="confidence-badge">{receipt.lines.length ? Math.round(receipt.lines.reduce((sum, line) => sum + line.confidence, 0) / receipt.lines.length) : 0}% average</span><button className="secondary-button" type="button" onClick={resetScan}>Scan another receipt <span aria-hidden="true">↗</span></button></div></div>
+          <div className="result-header"><div><p className="eyebrow">{receiptSource === "demo" ? "Seeded demo extraction" : "Latest extraction"}</p><h2>{receipt.merchant ?? "Unknown merchant"}</h2><p className="result-date">{receipt.date ?? "Date not found"}</p></div><div className="result-actions"><span className="confidence-badge">{receipt.lines.length ? Math.round(receipt.lines.reduce((sum, line) => sum + line.confidence, 0) / receipt.lines.length) : 0}% average</span><button className="secondary-button" type="button" onClick={() => void copyDevReport()}>{reportCopied ? "Dev report copied" : "Copy dev report"} <span aria-hidden="true">↗</span></button><button className="secondary-button" type="button" onClick={resetScan}>Scan another receipt <span aria-hidden="true">↗</span></button></div></div>
           <div className="totals"><div><span>Total</span><strong>{themeMoney(receipt.total ?? receipt.balance)}</strong></div><div><span>Subtotal</span><strong>{themeMoney(receipt.subtotal)}</strong></div><div><span>Tax</span><strong>{themeMoney(receipt.tax)}</strong></div></div>
           {receipt.warnings.length > 0 && <div className="extraction-warning" role="status"><strong>Review before using this receipt</strong><ul>{receipt.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul></div>}
           <div className="line-table"><div className="table-head"><span>Receipt line</span><span>Normalized description</span><span>Amount</span><span>Confidence</span></div>{receipt.lines.map((line, index) => <div className="table-row" key={`${line.rawText}-${index}`}><span className="raw-line">{line.rawText}</span><span><strong>{line.description ?? "Unmatched item"}</strong><small>{line.quantity != null ? `${line.quantity} ${line.unit ?? ""}` : "Quantity not found"}</small></span><span>{themeMoney(line.amount)}</span><span className={line.needsReview ? "review-confidence" : "good-confidence"}>{Math.round(line.confidence)}%</span></div>)}
-            {(() => {
-              const productTotal = receipt.reconciliation?.productTotal ?? sumLineAmounts(receipt.lines);
-              const discountTotal = receipt.reconciliation?.discountTotal ?? 0;
-              const calculatedSubtotal = receipt.reconciliation?.calculatedSubtotal ?? (productTotal == null ? null : Math.round((productTotal - discountTotal) * 100) / 100);
-              return <div className="reconciliation-summary" aria-label="Subtotal calculation">
-                <div><span>Product total</span><strong>{themeMoney(productTotal)}</strong><small>Before coupons</small></div>
-                <div><span>Coupons / discounts</span><strong className="reconciliation-discount">{discountTotal > 0 ? `−${themeMoney(discountTotal)}` : themeMoney(0)}</strong><small>Applied to product total</small></div>
-                <div><span>Calculated subtotal</span><strong>{themeMoney(calculatedSubtotal)}</strong><small>Product total minus coupons</small></div>
-              </div>;
-            })()}
+            <div className="reconciliation-summary" aria-label="Subtotal calculation">
+              <div><span>Product total</span><strong>{themeMoney(reconciliation?.productTotal ?? null)}</strong><small>Before coupons</small></div>
+              <div><span>Coupons / discounts</span><strong className="reconciliation-discount">{(reconciliation?.discountTotal ?? 0) > 0 ? `−${themeMoney(reconciliation?.discountTotal ?? 0)}` : themeMoney(0)}</strong><small>Applied to product total</small></div>
+              <div><span>Calculated subtotal</span><strong>{themeMoney(reconciliation?.calculatedSubtotal ?? null)}</strong><small>Product total minus coupons</small></div>
+            </div>
           </div>
           <details className="raw-details"><summary>Show transcribed receipt text</summary><pre>{rawText || "No transcribed receipt text returned."}</pre></details>
           <PurchaseAnalysis receiptSource={receiptSource} onReview={() => setReviewOpen(true)} />
