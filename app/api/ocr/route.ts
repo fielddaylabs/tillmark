@@ -280,7 +280,7 @@ function reconcileReceipt(receipt: Receipt, transcription: Transcription) {
   const reportedTotal = receipt.total ?? receipt.balance;
   const modelDiscountTotal = inferModelCouponTotal(receipt.adjustments);
   const transcribedCouponTotal = inferCouponTotal(transcription.ocrText);
-  const discountTotal = transcribedCouponTotal || modelDiscountTotal;
+  const discountTotal = roundMoney(Math.max(modelDiscountTotal, transcribedCouponTotal));
   const netProductTotal = roundMoney(Math.max(0, lineTotal - discountTotal));
   const calculatedSubtotal = reportedTotal != null && receipt.tax != null
     ? roundMoney(Math.max(0, reportedTotal - receipt.tax))
@@ -296,7 +296,7 @@ function reconcileReceipt(receipt: Receipt, transcription: Transcription) {
 
   const uniqueWarnings = [...new Set(warnings)].filter((warning) => {
     if (!productSubtotalMatches) return true;
-    return !/subtotal|line-item.*(?:do not|cannot|not).*(?:reconcile|match)|product prices already reflect|coupons? plus .*tax reconcile|valued customer.*(?:unclear|product)|garlic bread.*(?:price|coupon).*(?:not visible|unclear)/i.test(warning);
+    return !/subtotal|line-item.*(?:do not|cannot|not).*(?:reconcile|match)|product prices already reflect|coupons? plus .*tax reconcile|printed balance.*(?:higher|lower|difference|result)|on sale you saved.*informational|valued customer.*(?:unclear|product)|garlic bread.*(?:price|coupon).*(?:not visible|unclear)/i.test(warning);
   });
 
   if (!receipt.lines.length) uniqueWarnings.push("No purchased line items were confidently identified.");
