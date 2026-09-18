@@ -33,6 +33,7 @@ type ReceiptTiming = {
   imageCount: number;
   model: string;
   reasoningEffort: string;
+  scanMode: "fast" | "refine";
 };
 
 type Receipt = {
@@ -55,6 +56,7 @@ type Receipt = {
 };
 
 type ReceiptSource = "demo" | "upload" | "camera";
+type ScanPhase = "idle" | "scanning" | "refining" | "complete";
 
 const demoReceipt: Receipt = {
   merchant: "ShopRite",
@@ -110,6 +112,16 @@ function displayCategory(line: ReceiptLine) {
 
 function lineNeedsReview(line: ReceiptLine) {
   return line.confidence < 90 || line.amount == null || !line.description;
+}
+
+function shouldRefineReceipt(receipt: Receipt) {
+  const averageConfidence = receipt.lines.length
+    ? receipt.lines.reduce((sum, line) => sum + line.confidence, 0) / receipt.lines.length
+    : 0;
+  const hasWeakLine = receipt.lines.some((line) => line.confidence < 85 || line.amount == null || !line.description);
+  const missingCoreField = !receipt.merchant || (receipt.total == null && receipt.balance == null);
+  const riskyWarning = receipt.warnings.some((warning) => /unreadable|unclear|cannot|not visible|does not reconcile|uncertain|cropped|partially/i.test(warning));
+  return averageConfidence < 90 || hasWeakLine || missingCoreField || riskyWarning;
 }
 
 function receiptIsReconciled(receipt: Receipt, reconciliation: ReturnType<typeof getReconciliation>) {
@@ -227,12 +239,15 @@ export default function CaptureView() {
   const [status, setStatus] = useState("Ready for a receipt photo");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [scanPhase, setScanPhase] = useState<ScanPhase>("idle");
+  const [refining, setRefining] = useState(false);
   const [reportCopied, setReportCopied] = useState(false);
   const [cameraState, setCameraState] = useState<"checking" | "ready" | "unsupported" | "denied">("checking");
   const [reviewOpen, setReviewOpen] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const scanRequestRef = useRef(0);
 
   useEffect(() => {
     if (!preview) return;
@@ -263,20 +278,27 @@ export default function CaptureView() {
 
   function chooseFile(nextFile: File | undefined, source: ReceiptSource = "upload") {
     if (!nextFile) return;
+    const requestId = ++scanRequestRef.current;
     setError(null);
     setReceipt(null);
+    setRefining(false);
+    setScanPhase("scanning");
     setReceiptSource(source);
     setReportCopied(false);
     setFile(nextFile);
     setPreview(URL.createObjectURL(nextFile));
-    setStatus("Starting extraction...");
-    void extractFile(nextFile, source);
+    setStatus("Starting fast scan...");
+    void extractFile(nextFile, source, requestId);
   }
 
   function loadDemoReceipt() {
+    scanRequestRef.current += 1;
+    setBusy(false);
     setFile(null);
     setPreview(null);
     setReceipt(demoReceipt);
+    setRefining(false);
+    setScanPhase("complete");
     setReceiptSource("demo");
     setReportCopied(false);
     setRawText(demoReceipt.lines.map((line) => line.rawText).join("\n"));
@@ -286,9 +308,13 @@ export default function CaptureView() {
   }
 
   function resetScan() {
+    scanRequestRef.current += 1;
     setFile(null);
     setPreview(null);
     setReceipt(null);
+    setBusy(false);
+    setRefining(false);
+    setScanPhase("idle");
     setReportCopied(false);
     setRawText("");
     setError(null);
@@ -306,30 +332,57 @@ export default function CaptureView() {
     chooseFile(event.dataTransfer.files?.[0]);
   }
 
-  async function extractFile(receiptFile: File, source: ReceiptSource = "upload") {
-    const clientStartedAt = Date.now();
+  async function extractFile(receiptFile: File, source: ReceiptSource, requestId: number) {
     setBusy(true);
     setError(null);
     setReceipt(null);
-    setStatus("Reading receipt...");
-    const formData = new FormData();
-    formData.append("receipt", receiptFile);
-    try {
+
+    async function requestReceipt(scanMode: "fast" | "refine") {
+      const clientStartedAt = Date.now();
+      const formData = new FormData();
+      formData.append("receipt", receiptFile);
+      formData.append("scanMode", scanMode);
       const response = await fetch("/api/ocr", { method: "POST", body: formData });
       const payload = (await response.json()) as { receipt?: Receipt; rawText?: string; error?: string };
       if (!response.ok || !payload.receipt) throw new Error(payload.error ?? "Receipt extraction failed.");
       const nextReceipt = payload.receipt.timing
         ? { ...payload.receipt, timing: { ...payload.receipt.timing, clientElapsedMs: Date.now() - clientStartedAt } }
         : payload.receipt;
-      setReceipt(nextReceipt);
+      return { receipt: nextReceipt, rawText: payload.rawText ?? "" };
+    }
+
+    try {
+      setStatus("Reading enhanced image...");
+      const firstPass = await requestReceipt("fast");
+      if (requestId !== scanRequestRef.current) return;
+      setReceipt(firstPass.receipt);
       setReceiptSource(source);
-      setRawText(payload.rawText ?? "");
+      setRawText(firstPass.rawText);
+
+      if (!shouldRefineReceipt(firstPass.receipt)) {
+        setScanPhase("complete");
+        setStatus("Extraction complete");
+        return;
+      }
+
+      setRefining(true);
+      setScanPhase("refining");
+      setStatus("Still improving this scan...");
+      const refinedPass = await requestReceipt("refine");
+      if (requestId !== scanRequestRef.current) return;
+      setReceipt(refinedPass.receipt);
+      setRawText(refinedPass.rawText);
+      setRefining(false);
+      setScanPhase("complete");
       setStatus("Extraction complete");
     } catch (caught) {
+      if (requestId !== scanRequestRef.current) return;
+      setRefining(false);
+      setScanPhase("idle");
       setError(caught instanceof Error ? caught.message : "Receipt extraction failed.");
       setStatus("Could not extract receipt");
     } finally {
-      setBusy(false);
+      if (requestId === scanRequestRef.current) setBusy(false);
     }
   }
 
@@ -381,7 +434,7 @@ export default function CaptureView() {
 
   return <>
     <PageHeading eyebrow="Capture" title="Turn a receipt into a decision." description="Identify products, confirm the purchase, and surface the ones that deserve a closer look." action={<span className="demo-badge">Board demo</span>} />
-    <section className="workspace">
+    <section className={`workspace ${scanPhase === "scanning" && !receipt ? "is-scanning" : ""}`}>
       <div className="left-column">
         <div className="camera-card">
           {cameraState === "ready" ? <><video ref={videoRef} autoPlay playsInline muted className="camera-view" /><button className="camera-button" onClick={captureAndExtract} disabled={busy}>{busy ? "Processing..." : "Capture receipt"}<span>O</span></button></> : <div className="camera-placeholder"><span className="camera-glyph">O</span><strong>{cameraState === "checking" ? "Checking for camera..." : "Camera unavailable"}</strong><small>{cameraState === "denied" ? "Allow camera access to scan directly, or upload a photo below." : "Use the upload option below on this device."}</small>{cameraState === "denied" && <button className="text-button" onClick={() => void startCamera()}>Try camera again</button>}</div>}
@@ -399,9 +452,21 @@ export default function CaptureView() {
         {error && <div className="error-box" role="alert">{error}</div>}
         <p className="privacy-note">Uploaded images are processed for this request only. Demo data is stored in this browser session.</p>
       </div>
-      <div className="results-panel">
-        {!receipt ? <div className="empty-result"><span className="empty-index">Capture</span><h2>Extraction appears here.</h2><p>Merchant, date, totals, and line items will be returned together.</p><div className="empty-flow"><span>Receipt</span><i>→</i><span>Products</span><i>→</i><span>Purchasing signal</span></div></div> : <>
-          <div className="result-header"><div><p className="eyebrow">{receiptSource === "demo" ? "Seeded demo extraction" : "Latest extraction"}</p><h2>{receipt.merchant ?? "Unknown merchant"}</h2><p className="result-date">{receipt.date ?? "Date not found"} <span>·</span> {receipt.lines.length} products identified</p></div><div className="result-actions"><span className={`confidence-badge ${isReconciled ? "is-reconciled" : ""}`}>{averageConfidence}% extraction confidence</span><button className="quiet-button report-button" type="button" onClick={() => void copyDevReport()}>{reportCopied ? "Report copied" : "Copy dev report"} <span aria-hidden="true">↗</span></button><button className="secondary-button" type="button" onClick={resetScan}>Scan another receipt <span aria-hidden="true">↗</span></button></div></div>
+      <div className={`results-panel ${scanPhase === "scanning" && !receipt ? "is-scanning" : ""}`}>
+        {!receipt ? scanPhase === "scanning" && preview ? <div className="scan-loading-stage" role="status" aria-live="polite">
+          <div className="scan-visual">
+            <img src={preview} alt="Receipt being scanned" />
+            <span className="scan-frame" aria-hidden="true" />
+            <span className="scan-beam" aria-hidden="true" />
+            <span className="scan-corner scan-corner-top-left" aria-hidden="true" />
+            <span className="scan-corner scan-corner-top-right" aria-hidden="true" />
+            <span className="scan-corner scan-corner-bottom-left" aria-hidden="true" />
+            <span className="scan-corner scan-corner-bottom-right" aria-hidden="true" />
+          </div>
+          <div className="scan-loading-copy"><span className="eyebrow">Fast pass · enhanced image</span><h2>Reading the receipt.</h2><p>Finding the merchant, totals, and first set of line items now.</p><div className="scan-progress"><i /></div><small>Results will appear as soon as the first pass is ready.</small></div>
+        </div> : <div className="empty-result"><span className="empty-index">Capture</span><h2>Extraction appears here.</h2><p>Merchant, date, totals, and line items will be returned together.</p><div className="empty-flow"><span>Receipt</span><i>→</i><span>Products</span><i>→</i><span>Purchasing signal</span></div></div> : <>
+          {refining && <div className="refinement-banner" role="status" aria-live="polite"><span className="refinement-mark" aria-hidden="true"><i /></span><div><strong>Still improving this scan</strong><p>The first read needs a closer look, so we’re checking the original image against the enhanced version.</p></div><span className="refinement-dots" aria-hidden="true">···</span></div>}
+          <div className="result-header"><div><p className="eyebrow">{receiptSource === "demo" ? "Seeded demo extraction" : "Latest extraction"}</p><h2>{receipt.merchant ?? "Unknown merchant"}</h2><p className="result-date">{receipt.date ?? "Date not found"} <span>·</span> {receipt.lines.length} products identified</p></div><div className="result-actions"><span className={`confidence-badge ${isReconciled ? "is-reconciled" : ""}`}>{averageConfidence}% extraction confidence</span><button className="quiet-button report-button" type="button" onClick={() => void copyDevReport()}>{reportCopied ? "Report copied" : "Copy dev report"} <span aria-hidden="true">↗</span></button><button className="secondary-button" type="button" onClick={resetScan} disabled={busy}>Scan another receipt <span aria-hidden="true">↗</span></button></div></div>
           <div className="totals"><div className="total-primary"><span>Total paid</span><strong>{themeMoney(receipt.total ?? receipt.balance)}</strong><small>{receipt.total != null ? "Receipt total" : "Balance captured from receipt"}</small></div><div><span>Subtotal</span><strong>{themeMoney(receipt.subtotal)}</strong><small>After discounts</small></div><div><span>Tax</span><strong>{themeMoney(receipt.tax)}</strong><small>Applied at checkout</small></div></div>
           <div className={`receipt-status ${isReconciled ? "is-reconciled" : "is-review"}`} role="status"><span className="receipt-status-mark" aria-hidden="true">{isReconciled ? "✓" : "!"}</span><div><strong>{isReconciled ? "Receipt totals reconcile" : "Review recommended"}</strong><p>{isReconciled ? `${receipt.lines.length} products, ${couponCount(receipt)} coupons, and tax are accounted for.` : "Some receipt values still need confirmation before this purchase is used."}</p></div>{receipt.warnings.length > 0 && <details className="review-details"><summary>{receipt.warnings.length} review {receipt.warnings.length === 1 ? "note" : "notes"}</summary><ul>{receipt.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul></details>}</div>
           <div className="line-table"><div className="table-head"><span>Product</span><span>Receipt detail</span><span>Amount</span><span>Match</span></div>{receipt.lines.map((line, index) => <div className="table-row" key={`${line.rawText}-${index}`}><span className="product-cell"><strong>{displayDescription(line)}</strong><small className="raw-line">{line.rawText}</small></span><span className="product-meta"><small>{line.quantity != null ? `${line.quantity} ${line.unit ?? "item"}` : "Quantity not found"}</small><small>{displayCategory(line)}</small></span><span className="amount-cell">{themeMoney(line.amount)}</span><span className={lineNeedsReview(line) ? "review-confidence" : "good-confidence"}>{lineNeedsReview(line) ? "Review" : `${Math.round(line.confidence)}%`}</span></div>)}

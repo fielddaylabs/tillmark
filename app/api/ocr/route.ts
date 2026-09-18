@@ -86,6 +86,7 @@ type ReceiptTiming = {
   imageCount: number;
   model: string;
   reasoningEffort: string;
+  scanMode: "fast" | "refine";
 };
 
 type Receipt = {
@@ -117,7 +118,7 @@ Then extract the structured fields and purchased products from the same images. 
 Return every purchased product, even when it is next to or split across SC, MC, loyalty, or "On Sale You Saved" rows. Exclude only rows that are clearly discounts, coupons, loyalty adjustments, tax, payment, change, balance, or footer text; record those excluded rows in adjustments when they have financial meaning. Treat "On Sale You Saved" as informational sale pricing when the product line already contains its sale price; do not count that row as an additional deduction. Only an explicit negative-F coupon token such as 1.00-F should reduce the product total. Count every repeated negative-F coupon row, including rows beginning with SC or MC; do not collapse duplicate coupons.
 Keep rawText close to the visible product text. Normalize description only when the text supports it. Never convert an abbreviation into an unrelated product: if a product cannot be identified, use a cautious description or null and set needsReview true.
 Amounts must be numeric dollars. Use the actual visible line amount, not a guessed catalog price. Use null when a number cannot be read. For ShopRite thermal receipts, a token such as 1.00-F is a coupon/adjustment, never a product price. The regular product price is the vertically aligned amount ending in F, which may appear on the next physical OCR row. Keep coupon-only tokens in adjustments and associate the following regular price with the preceding product when the receipt layout requires it. In the lower product block, do not assign the garlic bread's 1.00-F coupon as its item price or assign the next product's price to it. For discount, coupon, and loyalty adjustments, amount is the positive amount deducted. Return confidence as a whole-number percentage from 0 to 100, and set needsReview true below 90 or whenever an important field is uncertain.
-The receipt may contain multiple price columns. Read each product and its price horizontally across the same physical row or aligned price column; do not pair text and prices by diagonal proximity. Report subtotal, tax, total, and balance separately. BALANCE is the final amount paid; when BALANCE is readable, use it as the authoritative total even if a separate total is missing or unclear. If a subtotal is not printed, use null. Do not force line items to add to the total when discounts or coupons are present; preserve those adjustments and add a warning if the result cannot be reconciled. A row beginning with Valued Customer is loyalty/footer text unless the image clearly proves it is a purchased product; never duplicate a neighboring product price into that row.`;
+The receipt may contain multiple price columns. Read each product and its price horizontally across the same physical row or aligned price column; do not pair text and prices by diagonal proximity. Report subtotal, tax, total, and balance separately. BALANCE is the final amount paid; when BALANCE is readable, use it as the authoritative total even if a separate total is missing or unclear. If a subtotal is not printed, use null. Do not force line items to add to the total when discounts or coupons are present; preserve those adjustments and add a warning if the result cannot be reconciled. A row beginning with Valued Customer is loyalty/footer text unless the image clearly proves it is a purchased product; never duplicate a neighboring product price into that row. When both image versions are provided, use the enhanced image for small text and the original image for layout and context.`;
 
 function dataUrl(buffer: Buffer, mimeType: string) {
   return `data:${mimeType};base64,${buffer.toString("base64")}`;
@@ -348,6 +349,7 @@ export async function POST(request: Request) {
   if (!apiKey) return NextResponse.json({ error: "OPENAI_API_KEY is not configured on the server." }, { status: 500 });
   const formData = await request.formData();
   const file = formData.get("receipt");
+  const scanMode = formData.get("scanMode") === "refine" ? "refine" : "fast";
   if (!(file instanceof File)) return NextResponse.json({ error: "Upload a receipt image." }, { status: 400 });
   if (!file.type.startsWith("image/")) return NextResponse.json({ error: "Receipt must be a JPG, PNG, or WebP image." }, { status: 400 });
   if (file.size > 10 * 1024 * 1024) return NextResponse.json({ error: "Receipt image must be 10 MB or smaller." }, { status: 400 });
@@ -360,6 +362,12 @@ export async function POST(request: Request) {
     const client = new OpenAI({ apiKey });
     const model = process.env.OPENAI_MODEL || "gpt-5.6-luna";
     const modelStartedAt = Date.now();
+    const imageContent = scanMode === "fast"
+      ? [{ type: "input_image" as const, image_url: enhanced, detail: "high" as const }]
+      : [
+        { type: "input_image" as const, image_url: original, detail: "high" as const },
+        { type: "input_image" as const, image_url: enhanced, detail: "high" as const },
+      ];
     const extractionResponse = await client.responses.create({
       model,
       store: false,
@@ -369,9 +377,13 @@ export async function POST(request: Request) {
       input: [{
         role: "user",
         content: [
-          { type: "input_text", text: "Read the complete receipt and return its full row-by-row transcription plus the structured extraction. The first image is the original; the second is a normalized high-resolution grayscale version." },
-          { type: "input_image", image_url: original, detail: "high" },
-          { type: "input_image", image_url: enhanced, detail: "high" },
+          {
+            type: "input_text",
+            text: scanMode === "fast"
+              ? "Read the complete receipt from this enhanced, normalized image and return its full row-by-row transcription plus the structured extraction."
+              : "Read the complete receipt and return its full row-by-row transcription plus the structured extraction. The first image is the original; the second is a normalized high-resolution grayscale version.",
+          },
+          ...imageContent,
         ],
       }],
       text: { format: { type: "json_schema", name: "receipt_extraction", strict: true, schema: receiptSchema } },
@@ -393,9 +405,10 @@ export async function POST(request: Request) {
       modelMs,
       postProcessMs,
       modelCalls: 1,
-      imageCount: 2,
+      imageCount: imageContent.length,
       model,
       reasoningEffort: "low",
+      scanMode,
     };
     console.info("Receipt OCR timing", receipt.timing);
     return NextResponse.json({ receipt, rawText: receipt.ocrText });
