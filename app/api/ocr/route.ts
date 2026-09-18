@@ -347,14 +347,14 @@ function reconcileReceipt(receipt: Receipt, transcription: Transcription) {
 export async function POST(request: Request) {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) return NextResponse.json({ error: "OPENAI_API_KEY is not configured on the server." }, { status: 500 });
-  const formData = await request.formData();
-  const file = formData.get("receipt");
-  const scanMode = formData.get("scanMode") === "refine" ? "refine" : "fast";
-  if (!(file instanceof File)) return NextResponse.json({ error: "Upload a receipt image." }, { status: 400 });
-  if (!file.type.startsWith("image/")) return NextResponse.json({ error: "Receipt must be a JPG, PNG, or WebP image." }, { status: 400 });
-  if (file.size > 10 * 1024 * 1024) return NextResponse.json({ error: "Receipt image must be 10 MB or smaller." }, { status: 400 });
-
   try {
+    const formData = await request.formData();
+    const file = formData.get("receipt");
+    const scanMode = formData.get("scanMode") === "refine" ? "refine" : "fast";
+    if (!(file instanceof File)) return NextResponse.json({ error: "Upload a receipt image." }, { status: 400 });
+    if (!file.type.startsWith("image/")) return NextResponse.json({ error: "Receipt must be a JPG, PNG, or WebP image." }, { status: 400 });
+    if (file.size > 10 * 1024 * 1024) return NextResponse.json({ error: "Receipt image must be 10 MB or smaller." }, { status: 400 });
+
     const startedAt = Date.now();
     const prepStartedAt = Date.now();
     const { original, enhanced } = await prepareImages(file);

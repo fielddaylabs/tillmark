@@ -146,6 +146,53 @@ function reportMoney(value: number | null) {
   return value == null ? "n/a" : themeMoney(value);
 }
 
+const maxUploadBytes = 3.5 * 1024 * 1024;
+
+function canvasToJpeg(canvas: HTMLCanvasElement, quality: number) {
+  return new Promise<Blob>((resolve, reject) => {
+    canvas.toBlob((blob) => {
+      if (blob) resolve(blob);
+      else reject(new Error("The receipt image could not be prepared."));
+    }, "image/jpeg", quality);
+  });
+}
+
+async function prepareReceiptUpload(file: File) {
+  const objectUrl = URL.createObjectURL(file);
+  try {
+    const image = new Image();
+    image.decoding = "async";
+    await new Promise<void>((resolve, reject) => {
+      image.onload = () => resolve();
+      image.onerror = () => reject(new Error("The receipt image could not be opened."));
+      image.src = objectUrl;
+    });
+
+    const sourceWidth = image.naturalWidth;
+    const sourceHeight = image.naturalHeight;
+    const sourceMaxDimension = Math.max(sourceWidth, sourceHeight);
+    if (file.size <= maxUploadBytes && sourceMaxDimension <= 2200 && file.type === "image/jpeg") return file;
+
+    const scale = Math.min(1, 2200 / sourceMaxDimension);
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(sourceWidth * scale));
+    canvas.height = Math.max(1, Math.round(sourceHeight * scale));
+    canvas.getContext("2d")?.drawImage(image, 0, 0, canvas.width, canvas.height);
+
+    let quality = 0.84;
+    let blob = await canvasToJpeg(canvas, quality);
+    while (blob.size > maxUploadBytes && quality > 0.58) {
+      quality -= 0.08;
+      blob = await canvasToJpeg(canvas, quality);
+    }
+
+    const baseName = file.name.replace(/\.[^.]+$/, "") || "receipt";
+    return new File([blob], `${baseName}.jpg`, { type: "image/jpeg", lastModified: file.lastModified });
+  } finally {
+    URL.revokeObjectURL(objectUrl);
+  }
+}
+
 function buildDevReport(receipt: Receipt, rawText: string, receiptSource: ReceiptSource, file: File | null) {
   const reconciliation = getReconciliation(receipt);
   const resultPayload = { ...receipt, ocrText: rawText, adjustments: receipt.adjustments ?? [] };
@@ -340,10 +387,20 @@ export default function CaptureView() {
     async function requestReceipt(scanMode: "fast" | "refine") {
       const clientStartedAt = Date.now();
       const formData = new FormData();
-      formData.append("receipt", receiptFile);
+      const uploadFile = await prepareReceiptUpload(receiptFile);
+      formData.append("receipt", uploadFile);
       formData.append("scanMode", scanMode);
       const response = await fetch("/api/ocr", { method: "POST", body: formData });
-      const payload = (await response.json()) as { receipt?: Receipt; rawText?: string; error?: string };
+      const responseText = await response.text();
+      let payload: { receipt?: Receipt; rawText?: string; error?: string };
+      try {
+        payload = JSON.parse(responseText) as { receipt?: Receipt; rawText?: string; error?: string };
+      } catch {
+        if (response.status === 413 || /request entity too large|payload too large/i.test(responseText)) {
+          throw new Error("This receipt image is too large to process. Try a smaller photo or crop it closer to the receipt.");
+        }
+        throw new Error(`Receipt extraction failed (${response.status}). Try the scan again.`);
+      }
       if (!response.ok || !payload.receipt) throw new Error(payload.error ?? "Receipt extraction failed.");
       const nextReceipt = payload.receipt.timing
         ? { ...payload.receipt, timing: { ...payload.receipt.timing, clientElapsedMs: Date.now() - clientStartedAt } }
