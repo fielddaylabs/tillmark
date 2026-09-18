@@ -5,7 +5,4 @@ const nextConfig: NextConfig = {
 };
 
 export default nextConfig;
-<<<<<<< HEAD
 
-=======
->>>>>>> 5c61f4c (init)
