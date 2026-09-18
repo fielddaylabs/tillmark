@@ -2,6 +2,8 @@
   "name": "Tillmark receipt extraction benchmark",
   "version": 1,
   "createdAt": "2026-09-18",
+  "latestRunAt": "2026-09-18",
+  "resultsPath": "results",
   "scope": {
     "chains": ["Aldi", "Hannaford", "ShopRite", "Stop & Shop", "Target", "Walmart"],
     "receiptsPerChain": 5,
@@ -18,7 +20,7 @@
     },
     {
       "chain": "Aldi",
-      "file": "receipts/aldi-02.jpeg",
+      "file": "receipts/aldi-02.webp",
       "source": "https://medium.com/the-billfold/show-us-your-grocery-receipts-part-2-calgary-co-op-whole-foods-trader-joe-s-and-aldi-s-e1bbb2d2fc0c",
       "sourceType": "editorial receipt photo",
       "qualityNotes": "Merchant and date are difficult to read."
@@ -32,14 +34,14 @@
     },
     {
       "chain": "Aldi",
-      "file": "receipts/aldi-04.jpg",
+      "file": "receipts/aldi-04.jpeg",
       "source": "https://joleisa.com/super-aldi-bbq-for-under-twenty-pounds/",
       "sourceType": "editorial receipt photo",
       "qualityNotes": "UK receipt; included as a format variation, not a US Aldi receipt."
     },
     {
       "chain": "Aldi",
-      "file": "receipts/aldi-05.png",
+      "file": "receipts/aldi-05.jpg",
       "source": "https://foundataldi.com/aldi-us-store-receipt-example",
       "sourceType": "receipt example",
       "qualityNotes": "Only part of the receipt and item descriptions are visible."
@@ -102,14 +104,14 @@
     },
     {
       "chain": "ShopRite",
-      "file": "receipts/shoprite-04.png",
+      "file": "receipts/shoprite-04.jpg",
       "source": "https://www.matchinggrants.org/district/pdf/doc3656-19788.pdf",
       "sourceType": "public receipt PDF crop",
       "qualityNotes": "Receipt was cropped from a larger PDF page and contains obscured content."
     },
     {
       "chain": "ShopRite",
-      "file": "receipts/shoprite-05.png",
+      "file": "receipts/shoprite-05.jpeg",
       "source": "https://www.matchinggrants.org/district/pdf/doc4113-22184.pdf",
       "sourceType": "public receipt PDF",
       "qualityNotes": "Digital receipt page shows item rows but not the final totals."
@@ -130,21 +132,21 @@
     },
     {
       "chain": "Stop & Shop",
-      "file": "receipts/stop-shop-03.jpg",
+      "file": "receipts/stop-shop-03.jpeg",
       "source": "https://www.thekitchn.com/grocery-diary-family-of-4-with-twins-23089070",
       "sourceType": "editorial receipt photo",
       "qualityNotes": "Receipt is small within a grocery photograph."
     },
     {
       "chain": "Stop & Shop",
-      "file": "receipts/stop-shop-04.jpg",
+      "file": "receipts/stop-shop-04.jpeg",
       "source": "https://www.thekitchn.com/grocery-diary-family-of-4-with-twins-23089070",
       "sourceType": "editorial receipt photo",
       "qualityNotes": "Receipt is small and blurred within a grocery photograph."
     },
     {
       "chain": "Stop & Shop",
-      "file": "receipts/stop-shop-05.png",
+      "file": "receipts/stop-shop-05.jpg",
       "source": "https://countryhillcasa.com/",
       "sourceType": "receipt image",
       "qualityNotes": "Receipt is cropped and contains coupon-formatted rows without all regular prices."
@@ -179,7 +181,7 @@
     },
     {
       "chain": "Target",
-      "file": "receipts/target-05.png",
+      "file": "receipts/target-05.jpeg",
       "source": "https://www.buzzfeed.com/audreyworboys/receipt-comparison-2020-vs-2022",
       "sourceType": "receipt screenshot",
       "qualityNotes": "Shopping-history style image; only part of the item list is visible."
@@ -193,7 +195,7 @@
     },
     {
       "chain": "Walmart",
-      "file": "receipts/walmart-02.png",
+      "file": "receipts/walmart-02.jpg",
       "source": "https://7news.com.au/lifestyle/internet-sad-as-shoppers-heartbreaking-receipt-detail-exposed-c-8662457",
       "sourceType": "news receipt photo",
       "qualityNotes": "Receipt contains a final payment amount that differs from the printed total."
@@ -207,14 +209,14 @@
     },
     {
       "chain": "Walmart",
-      "file": "receipts/walmart-04.png",
+      "file": "receipts/walmart-04.jpg",
       "source": "https://thekrazycouponlady.com/tips/money/walmart-overcharged-alabama-shoppers",
       "sourceType": "receipt photo",
       "qualityNotes": "Footer and date are partially obscured or missing."
     },
     {
       "chain": "Walmart",
-      "file": "receipts/walmart-05.png",
+      "file": "receipts/walmart-05.jpeg",
       "source": "https://www.passionforsavings.com/online/walmart-cash-back-offers/",
       "sourceType": "receipt photo",
       "qualityNotes": "Image is partially obscured and cropped before totals."
