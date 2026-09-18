@@ -21,4 +21,7 @@ A focused Next.js + TypeScript receipt extraction app. Tillmark accepts a JPG, P
 - No database, analytics, calculations, authentication, or long-term result storage yet.
 
 The API request sets `store: false`; add authentication, rate limiting, and deployment secrets before exposing this beyond a private demo.
+<<<<<<< HEAD
 
+=======
+>>>>>>> 5c61f4c (init)

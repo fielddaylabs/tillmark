@@ -13,4 +13,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
     </html>
   );
 }
+<<<<<<< HEAD
 
+=======
+>>>>>>> 5c61f4c (init)

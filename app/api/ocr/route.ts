@@ -71,4 +71,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "The receipt could not be extracted. Try a flatter, brighter photo." }, { status: 502 });
   }
 }
+<<<<<<< HEAD
 
+=======
+>>>>>>> 5c61f4c (init)
