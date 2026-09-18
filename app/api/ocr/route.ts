@@ -75,6 +75,7 @@ type ReceiptReconciliation = {
   productTotal: number | null;
   discountTotal: number | null;
   calculatedSubtotal: number | null;
+  bagFee: number | null;
 };
 
 type ReceiptTiming = {
@@ -264,6 +265,18 @@ function inferReconciledCouponTotal(lineTotal: number, reportedSubtotal: number 
     : explicitCouponTotal;
 }
 
+function isLikelyPaperBagFee(value: number) {
+  const cents = Math.round(Math.abs(value) * 100);
+  return value > 0 && cents < 50 && cents % 5 === 0;
+}
+
+function isIntentionalReviewNote(warning: string) {
+  const normalized = warning.toLowerCase();
+  const dateNote = normalized.includes("date") && /not|missing|unreadable|visible|cropped|obscured|unclear/.test(normalized);
+  const maskingNote = /mask(?:ed|ing)?|obscur(?:ed|e|ing)|redact/.test(normalized);
+  return dateNote || maskingNote;
+}
+
 function reconcileReceipt(receipt: Receipt, transcription: Transcription) {
   const warnings = [...transcription.warnings, ...receipt.warnings].filter(Boolean);
   const transcriptTax = extractLabeledAmount(transcription.ocrText, /^(?:sales\s+)?tax\b/i);
@@ -317,16 +330,24 @@ function reconcileReceipt(receipt: Receipt, transcription: Transcription) {
     });
   }
   const netProductTotal = roundMoney(Math.max(0, lineTotal - discountTotal));
-  const productSubtotalMatches = calculatedSubtotal != null && lineAmounts.length > 0 && Math.abs(netProductTotal - calculatedSubtotal) <= 0.05;
+  const subtotalGap = calculatedSubtotal != null && lineAmounts.length > 0
+    ? roundMoney(calculatedSubtotal - netProductTotal)
+    : null;
+  const bagFee = subtotalGap != null && isLikelyPaperBagFee(subtotalGap) ? subtotalGap : null;
+  const productSubtotalMatches = calculatedSubtotal != null
+    && lineAmounts.length > 0
+    && (roundMoney(netProductTotal - calculatedSubtotal) === 0 || bagFee != null);
 
   receipt.subtotal = calculatedSubtotal ?? receipt.subtotal ?? (lineAmounts.length ? netProductTotal : null);
   receipt.reconciliation = {
     productTotal: lineAmounts.length ? lineTotal : null,
     discountTotal: discountTotal || null,
     calculatedSubtotal: calculatedSubtotal ?? (lineAmounts.length ? netProductTotal : null),
+    bagFee,
   };
 
   const uniqueWarnings = [...new Set(warnings)].filter((warning) => {
+    if (isIntentionalReviewNote(warning)) return false;
     if (!productSubtotalMatches) return true;
     return !/subtotal|line-item.*(?:do not|cannot|not).*(?:reconcile|match)|product prices already reflect|coupons? plus .*tax reconcile|printed balance.*(?:higher|lower|difference|result)|does not visibly print a subtotal or total label.*balance|on sale you saved.*informational|valued customer.*(?:unclear|product)|garlic bread.*(?:price|coupon).*(?:not visible|unclear)/i.test(warning);
   });

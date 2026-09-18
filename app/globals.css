@@ -211,7 +211,7 @@ a { color: inherit; }
 .reconciliation-heading > span { color: var(--faint); font: 10px monospace; text-transform: uppercase; letter-spacing: .08em; }
 .reconciliation-heading strong { font-size: 10px; }
 .reconciliation-ok { color: var(--accent); }
-.reconciliation-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+.reconciliation-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 14px; }
 .reconciliation-summary span, .reconciliation-summary strong, .reconciliation-summary small { display: block; }
 .reconciliation-summary span { color: var(--muted); font: 10px monospace; text-transform: uppercase; margin-bottom: 6px; }
 .reconciliation-summary strong { font-size: 15px; letter-spacing: -.03em; }

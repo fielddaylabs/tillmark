@@ -51,6 +51,7 @@ type Receipt = {
     productTotal: number | null;
     discountTotal: number | null;
     calculatedSubtotal: number | null;
+    bagFee?: number | null;
   };
   timing?: ReceiptTiming;
 };
@@ -88,7 +89,8 @@ function getReconciliation(receipt: Receipt) {
   const productTotal = receipt.reconciliation?.productTotal ?? sumLineAmounts(receipt.lines);
   const discountTotal = receipt.reconciliation?.discountTotal ?? 0;
   const calculatedSubtotal = receipt.reconciliation?.calculatedSubtotal ?? (productTotal == null ? null : Math.round((productTotal - discountTotal) * 100) / 100);
-  return { productTotal, discountTotal, calculatedSubtotal };
+  const bagFee = receipt.reconciliation?.bagFee ?? 0;
+  return { productTotal, discountTotal, calculatedSubtotal, bagFee };
 }
 
 function displayDescription(line: ReceiptLine) {
@@ -118,10 +120,8 @@ function shouldRefineReceipt(receipt: Receipt) {
   const averageConfidence = receipt.lines.length
     ? receipt.lines.reduce((sum, line) => sum + line.confidence, 0) / receipt.lines.length
     : 0;
-  const hasWeakLine = receipt.lines.some((line) => line.confidence < 85 || line.amount == null || !line.description);
-  const missingCoreField = !receipt.merchant || (receipt.total == null && receipt.balance == null);
-  const riskyWarning = receipt.warnings.some((warning) => /unreadable|unclear|cannot|not visible|does not reconcile|uncertain|cropped|partially/i.test(warning));
-  return averageConfidence < 90 || hasWeakLine || missingCoreField || riskyWarning;
+  const hasLowConfidenceLine = receipt.lines.some((line) => line.confidence < 90);
+  return averageConfidence < 90 || hasLowConfidenceLine;
 }
 
 function receiptIsReconciled(receipt: Receipt, reconciliation: ReturnType<typeof getReconciliation>) {
@@ -130,7 +130,7 @@ function receiptIsReconciled(receipt: Receipt, reconciliation: ReturnType<typeof
     && receipt.tax != null
     && reconciliation.productTotal != null
     && reconciliation.calculatedSubtotal != null
-    && Math.abs(reconciliation.productTotal - reconciliation.discountTotal - reconciliation.calculatedSubtotal) <= 0.05
+    && Math.abs(reconciliation.productTotal - reconciliation.discountTotal + reconciliation.bagFee - reconciliation.calculatedSubtotal) <= 0.05
     && Math.abs(reconciliation.calculatedSubtotal + receipt.tax - total) <= 0.05;
 }
 
@@ -235,6 +235,7 @@ function buildDevReport(receipt: Receipt, rawText: string, receiptSource: Receip
     "## Reconciliation",
     `- Product total before coupons: ${reportMoney(reconciliation.productTotal)}`,
     `- Coupons / discounts applied: ${reportMoney(reconciliation.discountTotal)}`,
+    `- Assumed paper bag fees: ${reportMoney(reconciliation.bagFee)}`,
     `- Calculated subtotal: ${reportMoney(reconciliation.calculatedSubtotal)}`,
     "",
     "## Warnings",
@@ -527,7 +528,7 @@ export default function CaptureView() {
           <div className="totals"><div className="total-primary"><span>Total paid</span><strong>{themeMoney(receipt.total ?? receipt.balance)}</strong><small>{receipt.total != null ? "Receipt total" : "Balance captured from receipt"}</small></div><div><span>Subtotal</span><strong>{themeMoney(receipt.subtotal)}</strong><small>After discounts</small></div><div><span>Tax</span><strong>{themeMoney(receipt.tax)}</strong><small>Applied at checkout</small></div></div>
           <div className={`receipt-status ${isReconciled ? "is-reconciled" : "is-review"}`} role="status"><span className="receipt-status-mark" aria-hidden="true">{isReconciled ? "✓" : "!"}</span><div><strong>{isReconciled ? "Receipt totals reconcile" : "Review recommended"}</strong><p>{isReconciled ? `${receipt.lines.length} products, ${couponCount(receipt)} coupons, and tax are accounted for.` : "Some receipt values still need confirmation before this purchase is used."}</p></div>{receipt.warnings.length > 0 && <details className="review-details"><summary>{receipt.warnings.length} review {receipt.warnings.length === 1 ? "note" : "notes"}</summary><ul>{receipt.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul></details>}</div>
           <div className="line-table"><div className="table-head"><span>Product</span><span>Receipt detail</span><span>Amount</span><span>Match</span></div>{receipt.lines.map((line, index) => <div className="table-row" key={`${line.rawText}-${index}`}><span className="product-cell"><strong>{displayDescription(line)}</strong><small className="raw-line">{line.rawText}</small></span><span className="product-meta"><small>{line.quantity != null ? `${line.quantity} ${line.unit ?? "item"}` : "Quantity not found"}</small><small>{displayCategory(line)}</small></span><span className="amount-cell">{themeMoney(line.amount)}</span><span className={lineNeedsReview(line) ? "review-confidence" : "good-confidence"}>{lineNeedsReview(line) ? "Review" : `${Math.round(line.confidence)}%`}</span></div>)}
-            <div className="reconciliation-summary" aria-label="Subtotal calculation"><div className="reconciliation-heading"><span>Receipt math</span><strong className={isReconciled ? "reconciliation-ok" : "reconciliation-discount"}>{isReconciled ? "✓ Totals reconcile" : "Review totals"}</strong></div><div className="reconciliation-grid"><div><span>Product total</span><strong>{themeMoney(reconciliation?.productTotal ?? null)}</strong><small>Before coupons</small></div><div><span>Coupons / discounts</span><strong className="reconciliation-discount">{(reconciliation?.discountTotal ?? 0) > 0 ? `−${themeMoney(reconciliation?.discountTotal ?? 0)}` : themeMoney(0)}</strong><small>Applied to product total</small></div><div><span>Calculated subtotal</span><strong>{themeMoney(reconciliation?.calculatedSubtotal ?? null)}</strong><small>Product total minus coupons</small></div></div></div>
+            <div className="reconciliation-summary" aria-label="Subtotal calculation"><div className="reconciliation-heading"><span>Receipt math</span><strong className={isReconciled ? "reconciliation-ok" : "reconciliation-discount"}>{isReconciled ? "✓ Totals reconcile" : "Review totals"}</strong></div><div className="reconciliation-grid"><div><span>Product total</span><strong>{themeMoney(reconciliation?.productTotal ?? null)}</strong><small>Before coupons</small></div><div><span>Coupons / discounts</span><strong className="reconciliation-discount">{(reconciliation?.discountTotal ?? 0) > 0 ? `−${themeMoney(reconciliation?.discountTotal ?? 0)}` : themeMoney(0)}</strong><small>Applied to product total</small></div>{(reconciliation?.bagFee ?? 0) > 0 && <div><span>Paper bags</span><strong>{themeMoney(reconciliation?.bagFee ?? 0)}</strong><small>Assumed at $0.05 each</small></div>}<div><span>Calculated subtotal</span><strong>{themeMoney(reconciliation?.calculatedSubtotal ?? null)}</strong><small>Product total minus coupons and bags</small></div></div></div>
           </div>
           <details className="raw-details"><summary>Developer details · raw OCR and report tools</summary><div className="developer-actions"><button className="quiet-button" type="button" onClick={() => void copyDevReport()}>{reportCopied ? "Report copied" : "Copy full Markdown report"}<span aria-hidden="true">↗</span></button></div><pre>{rawText || "No transcribed receipt text returned."}</pre></details>
           <PurchaseAnalysis receiptSource={receiptSource} onReview={() => setReviewOpen(true)} />
