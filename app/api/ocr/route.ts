@@ -83,6 +83,12 @@ type ReceiptAdjustment = {
   amount: number | null;
 };
 
+type ReceiptReconciliation = {
+  productTotal: number | null;
+  discountTotal: number | null;
+  calculatedSubtotal: number | null;
+};
+
 type Receipt = {
   merchant: string | null;
   date: string | null;
@@ -95,6 +101,7 @@ type Receipt = {
   lines: ReceiptLine[];
   adjustments: ReceiptAdjustment[];
   warnings: string[];
+  reconciliation?: ReceiptReconciliation;
 };
 
 type Transcription = {
@@ -115,7 +122,7 @@ Use the supplied transcription as a candidate reading, but verify it against bot
 Return every purchased product, even when it is next to or split across SC, MC, loyalty, or "On Sale You Saved" rows. Exclude only rows that are clearly discounts, coupons, loyalty adjustments, tax, payment, change, balance, or footer text; record those excluded rows in adjustments when they have financial meaning.
 Keep rawText close to the visible product text. Normalize description only when the text supports it. Never convert an abbreviation into an unrelated product: if a product cannot be identified, use a cautious description or null and set needsReview true.
 Amounts must be numeric dollars. Use the actual visible line amount, not a guessed catalog price. Use null when a number cannot be read. For ShopRite thermal receipts, a token such as 1.00-F is a coupon/adjustment, never a product price. The regular product price is the vertically aligned amount ending in F, which may appear on the next physical OCR row. Keep coupon-only tokens in adjustments and associate the following regular price with the preceding product when the receipt layout requires it. In the lower product block, do not assign the garlic bread's 1.00-F coupon as its item price or assign the next product's price to it. For discount, coupon, and loyalty adjustments, amount is the positive amount deducted. Return confidence as a whole-number percentage from 0 to 100, and set needsReview true below 90 or whenever an important field is uncertain.
-The receipt may contain multiple price columns. Report subtotal, tax, total, and balance separately. If a subtotal is not printed, use null. Do not force line items to add to the total when discounts or coupons are present; preserve those adjustments and add a warning if the result cannot be reconciled.`;
+The receipt may contain multiple price columns. Read each product and its price horizontally across the same physical row or aligned price column; do not pair text and prices by diagonal proximity. Report subtotal, tax, total, and balance separately. If a subtotal is not printed, use null. Do not force line items to add to the total when discounts or coupons are present; preserve those adjustments and add a warning if the result cannot be reconciled. A row beginning with Valued Customer is loyalty/footer text unless the image clearly proves it is a purchased product; never duplicate a neighboring product price into that row.`;
 
 function dataUrl(buffer: Buffer, mimeType: string) {
   return `data:${mimeType};base64,${buffer.toString("base64")}`;
@@ -182,6 +189,15 @@ function normalizeReceiptText(text: string) {
   return text.toLowerCase().replace(/\d+\.\d{2}/g, "").replace(/[^a-z0-9]/g, "");
 }
 
+function isNonProductLine(line: ReceiptLine) {
+  const rawText = line.rawText.trim();
+  const description = line.description?.trim() ?? "";
+  return /^(?:valued customer|subtotal|total|balance|tax|sales tax|cash|credit|debit|payment|change|store number|shoprite|thank you)\b/i.test(rawText)
+    || /^(?:valued customer|subtotal|total|balance|tax|sales tax|cash|credit|debit|payment|change|store number|shoprite|thank you)\b/i.test(description)
+    || /^(?:sc|mc)\b/i.test(rawText)
+    || /^on sale you saved\b/i.test(rawText);
+}
+
 function repairCouponPriceAlignment(receipt: Receipt, transcriptionText: string) {
   const transcriptLines = transcriptionText.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
   for (let index = 0; index < receipt.lines.length - 1; index += 1) {
@@ -212,6 +228,12 @@ function repairCouponPriceAlignment(receipt: Receipt, transcriptionText: string)
   }
 }
 
+function inferCouponTotal(text: string) {
+  return roundMoney(extractReceiptPriceTokens(text)
+    .filter((token) => token.coupon)
+    .reduce((sum, token) => sum + token.value, 0));
+}
+
 function reconcileReceipt(receipt: Receipt, transcription: Transcription) {
   const warnings = [...transcription.warnings, ...receipt.warnings].filter(Boolean);
   const transcriptTax = extractLabeledAmount(transcription.ocrText, /^(?:sales\s+)?tax\b/i);
@@ -237,29 +259,34 @@ function reconcileReceipt(receipt: Receipt, transcription: Transcription) {
       confidence,
       needsReview: line.needsReview || confidence < 90 || line.amount == null || !line.description,
     };
-  });
+  }).filter((line) => !isNonProductLine(line));
   receipt.adjustments = receipt.adjustments.map((adjustment) => ({ ...adjustment, amount: normalizeMoney(adjustment.amount) }));
   repairCouponPriceAlignment(receipt, transcription.ocrText);
 
   const lineAmounts = receipt.lines.map((line) => line.amount).filter((amount): amount is number => amount != null);
   const lineTotal = roundMoney(lineAmounts.reduce((sum, amount) => sum + amount, 0));
   const reportedTotal = receipt.total ?? receipt.balance;
-  const reductionTotal = roundMoney(receipt.adjustments
-    .filter((adjustment) => adjustment.amount != null && ["discount", "coupon", "loyalty"].includes(adjustment.kind))
+  const modelDiscountTotal = roundMoney(receipt.adjustments
+    .filter((adjustment) => adjustment.amount != null && ["discount", "coupon"].includes(adjustment.kind))
     .reduce((sum, adjustment) => sum + (adjustment.amount ?? 0), 0));
-  const netProductTotal = roundMoney(Math.max(0, lineTotal - reductionTotal));
+  const transcribedCouponTotal = inferCouponTotal(transcription.ocrText);
+  const discountTotal = roundMoney(Math.max(modelDiscountTotal, transcribedCouponTotal));
+  const netProductTotal = roundMoney(Math.max(0, lineTotal - discountTotal));
   const calculatedSubtotal = reportedTotal != null && receipt.tax != null
     ? roundMoney(Math.max(0, reportedTotal - receipt.tax))
     : null;
   const productSubtotalMatches = calculatedSubtotal != null && lineAmounts.length > 0 && Math.abs(netProductTotal - calculatedSubtotal) <= 0.05;
 
-  if (receipt.subtotal == null) {
-    receipt.subtotal = calculatedSubtotal ?? (lineAmounts.length ? netProductTotal : null);
-  }
+  receipt.subtotal = calculatedSubtotal ?? receipt.subtotal ?? (lineAmounts.length ? netProductTotal : null);
+  receipt.reconciliation = {
+    productTotal: lineAmounts.length ? lineTotal : null,
+    discountTotal: discountTotal || null,
+    calculatedSubtotal: calculatedSubtotal ?? (lineAmounts.length ? netProductTotal : null),
+  };
 
   const uniqueWarnings = [...new Set(warnings)].filter((warning) => {
     if (!productSubtotalMatches) return true;
-    return !/subtotal|line-item amounts do not reconcile|product prices already reflect|coupons? plus .*tax reconcile/i.test(warning);
+    return !/subtotal|line-item amounts do not reconcile|product prices already reflect|coupons? plus .*tax reconcile|valued customer.*(?:unclear|product)|garlic bread.*(?:price|coupon).*(?:not visible|unclear)/i.test(warning);
   });
 
   if (!receipt.lines.length) uniqueWarnings.push("No purchased line items were confidently identified.");

@@ -27,6 +27,11 @@ type Receipt = {
   balance: number | null;
   lines: ReceiptLine[];
   warnings: string[];
+  reconciliation?: {
+    productTotal: number | null;
+    discountTotal: number | null;
+    calculatedSubtotal: number | null;
+  };
 };
 
 type ReceiptSource = "demo" | "upload" | "camera";
@@ -52,6 +57,10 @@ const demoReceipt: Receipt = {
 };
 
 const themeMoney = (value: number | null) => value == null ? "n/a" : new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(value);
+const sumLineAmounts = (lines: ReceiptLine[]) => {
+  const amounts = lines.map((line) => line.amount).filter((amount): amount is number => amount != null);
+  return amounts.length ? Math.round(amounts.reduce((sum, amount) => sum + amount, 0) * 100) / 100 : null;
+};
 
 function PurchaseAnalysis({ receiptSource, onReview }: { receiptSource: ReceiptSource; onReview: () => void }) {
   const { anomalyStatus } = useDemoState();
@@ -215,7 +224,18 @@ export default function CaptureView() {
           <div className="result-header"><div><p className="eyebrow">{receiptSource === "demo" ? "Seeded demo extraction" : "Latest extraction"}</p><h2>{receipt.merchant ?? "Unknown merchant"}</h2><p className="result-date">{receipt.date ?? "Date not found"}</p></div><div className="result-actions"><span className="confidence-badge">{receipt.lines.length ? Math.round(receipt.lines.reduce((sum, line) => sum + line.confidence, 0) / receipt.lines.length) : 0}% average</span><button className="secondary-button" type="button" onClick={resetScan}>Scan another receipt <span aria-hidden="true">↗</span></button></div></div>
           <div className="totals"><div><span>Total</span><strong>{themeMoney(receipt.total ?? receipt.balance)}</strong></div><div><span>Subtotal</span><strong>{themeMoney(receipt.subtotal)}</strong></div><div><span>Tax</span><strong>{themeMoney(receipt.tax)}</strong></div></div>
           {receipt.warnings.length > 0 && <div className="extraction-warning" role="status"><strong>Review before using this receipt</strong><ul>{receipt.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul></div>}
-          <div className="line-table"><div className="table-head"><span>Receipt line</span><span>Normalized description</span><span>Amount</span><span>Confidence</span></div>{receipt.lines.map((line, index) => <div className="table-row" key={`${line.rawText}-${index}`}><span className="raw-line">{line.rawText}</span><span><strong>{line.description ?? "Unmatched item"}</strong><small>{line.quantity != null ? `${line.quantity} ${line.unit ?? ""}` : "Quantity not found"}</small></span><span>{themeMoney(line.amount)}</span><span className={line.needsReview ? "review-confidence" : "good-confidence"}>{Math.round(line.confidence)}%</span></div>)}</div>
+          <div className="line-table"><div className="table-head"><span>Receipt line</span><span>Normalized description</span><span>Amount</span><span>Confidence</span></div>{receipt.lines.map((line, index) => <div className="table-row" key={`${line.rawText}-${index}`}><span className="raw-line">{line.rawText}</span><span><strong>{line.description ?? "Unmatched item"}</strong><small>{line.quantity != null ? `${line.quantity} ${line.unit ?? ""}` : "Quantity not found"}</small></span><span>{themeMoney(line.amount)}</span><span className={line.needsReview ? "review-confidence" : "good-confidence"}>{Math.round(line.confidence)}%</span></div>)}
+            {(() => {
+              const productTotal = receipt.reconciliation?.productTotal ?? sumLineAmounts(receipt.lines);
+              const discountTotal = receipt.reconciliation?.discountTotal ?? 0;
+              const calculatedSubtotal = receipt.reconciliation?.calculatedSubtotal ?? (productTotal == null ? null : Math.round((productTotal - discountTotal) * 100) / 100);
+              return <div className="reconciliation-summary" aria-label="Subtotal calculation">
+                <div><span>Product total</span><strong>{themeMoney(productTotal)}</strong><small>Before coupons</small></div>
+                <div><span>Coupons / discounts</span><strong className="reconciliation-discount">{discountTotal > 0 ? `−${themeMoney(discountTotal)}` : themeMoney(0)}</strong><small>Applied to product total</small></div>
+                <div><span>Calculated subtotal</span><strong>{themeMoney(calculatedSubtotal)}</strong><small>Product total minus coupons</small></div>
+              </div>;
+            })()}
+          </div>
           <details className="raw-details"><summary>Show transcribed receipt text</summary><pre>{rawText || "No transcribed receipt text returned."}</pre></details>
           <PurchaseAnalysis receiptSource={receiptSource} onReview={() => setReviewOpen(true)} />
         </>}
