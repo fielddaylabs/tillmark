@@ -95,7 +95,7 @@ function displayDescription(line: ReceiptLine) {
   if (raw.includes("MOZZ") && raw.includes("STICK") && raw.startsWith("FGF")) return "Feel Good Foods gluten-free mozzarella sticks";
   if (raw.includes("3 CHSE") && raw.includes("BITE")) return "Feel Good Foods three cheese bites";
   if (raw.includes("PEPPERON") && raw.includes("BITE")) return "Feel Good Foods pepperoni bites";
-  if (raw.includes("GILLIAM") && raw.includes("GARLIC")) return "Gilliam garlic bread";
+  if (raw.includes("GARLIC") && raw.includes("BRE")) return "Gilliam garlic bread";
   if (raw.includes("RUSSO") && raw.includes("MOZZ")) return "Russo gluten-free mozzarella sticks";
   return line.description ?? "Unmatched item";
 }
