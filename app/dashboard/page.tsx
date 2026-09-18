@@ -1,0 +1,6 @@
+import { AppShell } from "../components/app-shell";
+import DashboardView from "../views/dashboard-view";
+
+export default function DashboardPage() {
+  return <AppShell><DashboardView /></AppShell>;
+}

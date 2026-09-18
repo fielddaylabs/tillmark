@@ -1,9 +1,10 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import { DemoProvider } from "./components/demo-context";
 
 export const metadata: Metadata = {
-  title: "Tillmark — Receipt OCR",
-  description: "Tillmark turns receipt photos into structured purchasing data.",
+  title: "Tillmark | Food operations",
+  description: "Tillmark turns purchasing activity into clear operational action.",
 };
 
 const themeScript = `(() => {
@@ -24,7 +25,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
       <head>
         <script dangerouslySetInnerHTML={{ __html: themeScript }} />
       </head>
-      <body>{children}</body>
+      <body><DemoProvider>{children}</DemoProvider></body>
     </html>
   );
 }
