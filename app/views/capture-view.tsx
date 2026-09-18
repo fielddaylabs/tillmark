@@ -23,6 +23,18 @@ type ReceiptAdjustment = {
   amount: number | null;
 };
 
+type ReceiptTiming = {
+  clientElapsedMs?: number;
+  totalMs: number;
+  imagePrepMs: number;
+  modelMs: number;
+  postProcessMs: number;
+  modelCalls: number;
+  imageCount: number;
+  model: string;
+  reasoningEffort: string;
+};
+
 type Receipt = {
   merchant: string | null;
   date: string | null;
@@ -39,6 +51,7 @@ type Receipt = {
     discountTotal: number | null;
     calculatedSubtotal: number | null;
   };
+  timing?: ReceiptTiming;
 };
 
 type ReceiptSource = "demo" | "upload" | "camera";
@@ -147,6 +160,19 @@ function buildDevReport(receipt: Receipt, rawText: string, receiptSource: Receip
     `- Tax: ${reportMoney(receipt.tax)}`,
     `- Balance: ${reportMoney(receipt.balance)}`,
     "",
+    "## Performance",
+    ...(receipt.timing ? [
+      `- Client elapsed time: ${receipt.timing.clientElapsedMs ?? "n/a"} ms`,
+      `- Server request time: ${receipt.timing.totalMs} ms`,
+      `- Image preparation: ${receipt.timing.imagePrepMs} ms`,
+      `- Model processing: ${receipt.timing.modelMs} ms`,
+      `- Result reconciliation: ${receipt.timing.postProcessMs} ms`,
+      `- Model calls: ${receipt.timing.modelCalls}`,
+      `- Images sent: ${receipt.timing.imageCount}`,
+      `- Model: ${reportCell(receipt.timing.model)}`,
+      `- Reasoning effort: ${reportCell(receipt.timing.reasoningEffort)}`,
+    ] : ["- Timing unavailable for this seeded demo receipt"]),
+    "",
     "## Reconciliation",
     `- Product total before coupons: ${reportMoney(reconciliation.productTotal)}`,
     `- Coupons / discounts applied: ${reportMoney(reconciliation.discountTotal)}`,
@@ -243,7 +269,8 @@ export default function CaptureView() {
     setReportCopied(false);
     setFile(nextFile);
     setPreview(URL.createObjectURL(nextFile));
-    setStatus("Ready to extract");
+    setStatus("Starting extraction...");
+    void extractFile(nextFile, source);
   }
 
   function loadDemoReceipt() {
@@ -280,6 +307,7 @@ export default function CaptureView() {
   }
 
   async function extractFile(receiptFile: File, source: ReceiptSource = "upload") {
+    const clientStartedAt = Date.now();
     setBusy(true);
     setError(null);
     setReceipt(null);
@@ -290,7 +318,10 @@ export default function CaptureView() {
       const response = await fetch("/api/ocr", { method: "POST", body: formData });
       const payload = (await response.json()) as { receipt?: Receipt; rawText?: string; error?: string };
       if (!response.ok || !payload.receipt) throw new Error(payload.error ?? "Receipt extraction failed.");
-      setReceipt(payload.receipt);
+      const nextReceipt = payload.receipt.timing
+        ? { ...payload.receipt, timing: { ...payload.receipt.timing, clientElapsedMs: Date.now() - clientStartedAt } }
+        : payload.receipt;
+      setReceipt(nextReceipt);
       setReceiptSource(source);
       setRawText(payload.rawText ?? "");
       setStatus("Extraction complete");
@@ -339,7 +370,6 @@ export default function CaptureView() {
       if (!blob) return;
       const captured = new File([blob], "camera-receipt.jpg", { type: "image/jpeg" });
       chooseFile(captured, "camera");
-      void extractFile(captured, "camera");
     }, "image/jpeg", 0.92);
   }
 
@@ -354,7 +384,7 @@ export default function CaptureView() {
     <section className="workspace">
       <div className="left-column">
         <div className="camera-card">
-          {cameraState === "ready" ? <><video ref={videoRef} autoPlay playsInline muted className="camera-view" /><button className="camera-button" onClick={captureAndExtract} disabled={busy}>{busy ? "Processing..." : "Capture and extract"}<span>O</span></button></> : <div className="camera-placeholder"><span className="camera-glyph">O</span><strong>{cameraState === "checking" ? "Checking for camera..." : "Camera unavailable"}</strong><small>{cameraState === "denied" ? "Allow camera access to scan directly, or upload a photo below." : "Use the upload option below on this device."}</small>{cameraState === "denied" && <button className="text-button" onClick={() => void startCamera()}>Try camera again</button>}</div>}
+          {cameraState === "ready" ? <><video ref={videoRef} autoPlay playsInline muted className="camera-view" /><button className="camera-button" onClick={captureAndExtract} disabled={busy}>{busy ? "Processing..." : "Capture receipt"}<span>O</span></button></> : <div className="camera-placeholder"><span className="camera-glyph">O</span><strong>{cameraState === "checking" ? "Checking for camera..." : "Camera unavailable"}</strong><small>{cameraState === "denied" ? "Allow camera access to scan directly, or upload a photo below." : "Use the upload option below on this device."}</small>{cameraState === "denied" && <button className="text-button" onClick={() => void startCamera()}>Try camera again</button>}</div>}
         </div>
         <div className="capture-divider"><span>or upload a photo</span></div>
         <label className={`dropzone ${file ? "has-file" : ""}`} onDragOver={(event) => event.preventDefault()} onDrop={onDrop}>
@@ -367,7 +397,6 @@ export default function CaptureView() {
         <button className="demo-load-button" type="button" onClick={loadDemoReceipt}><span>Load demo receipt</span><small>ShopRite · includes Tide Pods anomaly</small><span>↗</span></button>
         <div className="status-line"><span className={`status-dot ${busy ? "busy" : ""}`} /><span>{status}</span></div>
         {error && <div className="error-box" role="alert">{error}</div>}
-        <button className="primary-button" onClick={() => file && void extractFile(file)} disabled={!file || busy}>{busy ? "Extracting..." : "Extract receipt"}<span>→</span></button>
         <p className="privacy-note">Uploaded images are processed for this request only. Demo data is stored in this browser session.</p>
       </div>
       <div className="results-panel">
