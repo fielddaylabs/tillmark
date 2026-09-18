@@ -1,0 +1,223 @@
+{
+  "name": "Tillmark receipt extraction benchmark",
+  "version": 1,
+  "createdAt": "2026-09-18",
+  "scope": {
+    "chains": ["Aldi", "Hannaford", "ShopRite", "Stop & Shop", "Target", "Walmart"],
+    "receiptsPerChain": 5,
+    "totalReceipts": 30,
+    "excludedForThisRound": ["Adams", "Restaurant Depot", "Price Chopper"]
+  },
+  "fixtures": [
+    {
+      "chain": "Aldi",
+      "file": "receipts/aldi-01.jpg",
+      "source": "https://thefinancialdiet.com/1-month-4-stores-exactly-what-i-spent-on-groceries-in-june/",
+      "sourceType": "editorial receipt photo",
+      "qualityNotes": "Black marks obscure portions of the receipt."
+    },
+    {
+      "chain": "Aldi",
+      "file": "receipts/aldi-02.jpeg",
+      "source": "https://medium.com/the-billfold/show-us-your-grocery-receipts-part-2-calgary-co-op-whole-foods-trader-joe-s-and-aldi-s-e1bbb2d2fc0c",
+      "sourceType": "editorial receipt photo",
+      "qualityNotes": "Merchant and date are difficult to read."
+    },
+    {
+      "chain": "Aldi",
+      "file": "receipts/aldi-03.jpg",
+      "source": "https://www.pinterest.com/pin/aldi-food-markets-review-great-value-at-lower-prices--77827899793918869/",
+      "sourceType": "receipt photo",
+      "qualityNotes": "Low-resolution image."
+    },
+    {
+      "chain": "Aldi",
+      "file": "receipts/aldi-04.jpg",
+      "source": "https://joleisa.com/super-aldi-bbq-for-under-twenty-pounds/",
+      "sourceType": "editorial receipt photo",
+      "qualityNotes": "UK receipt; included as a format variation, not a US Aldi receipt."
+    },
+    {
+      "chain": "Aldi",
+      "file": "receipts/aldi-05.png",
+      "source": "https://foundataldi.com/aldi-us-store-receipt-example",
+      "sourceType": "receipt example",
+      "qualityNotes": "Only part of the receipt and item descriptions are visible."
+    },
+    {
+      "chain": "Hannaford",
+      "file": "receipts/hannaford-01.jpg",
+      "source": "https://iwaspoisoned.com/biz/hannaford-532-main-st-saco-me-04072-usa",
+      "sourceType": "user-submitted receipt photo",
+      "qualityNotes": "Short receipt with limited context."
+    },
+    {
+      "chain": "Hannaford",
+      "file": "receipts/hannaford-02.jpeg",
+      "source": "https://www.thebillfold.com/2016/03/show-us-your-grocery-receipts-part-eight-market-district-aldi-trader-joe-s-and-hannaford/",
+      "sourceType": "editorial receipt photo",
+      "qualityNotes": "Full receipt photographed at an angle."
+    },
+    {
+      "chain": "Hannaford",
+      "file": "receipts/hannaford-03.jpg",
+      "source": "https://www.pressherald.com/2026/01/15/report-says-hannaford-grocery-prices-higher-in-low-income-maine-communities/",
+      "sourceType": "news receipt photo",
+      "qualityNotes": "Receipt is embedded in a larger editorial photograph."
+    },
+    {
+      "chain": "Hannaford",
+      "file": "receipts/hannaford-04.jpg",
+      "source": "https://huggingface.co/datasets/mychen76/invoices-and-receipts_ocr_v1/tree/main",
+      "sourceType": "OCR dataset image",
+      "qualityNotes": "Receipt is cropped and the footer is incomplete."
+    },
+    {
+      "chain": "Hannaford",
+      "file": "receipts/hannaford-05.jpg",
+      "source": "https://www.ebtcardbalance.com/hannaford-food-drug-161-snap-retailer-vermont-eld214812",
+      "sourceType": "receipt excerpt",
+      "qualityNotes": "EBT account transaction excerpt, not a normal full purchase receipt."
+    },
+    {
+      "chain": "ShopRite",
+      "file": "receipts/shoprite-01.jpeg",
+      "source": "user-provided local receipt",
+      "sourceType": "user receipt photo",
+      "qualityNotes": "Original Tillmark test image; photographed at an angle with a hand partly covering the receipt."
+    },
+    {
+      "chain": "ShopRite",
+      "file": "receipts/shoprite-02.png",
+      "source": "https://www.matchinggrants.org/district/pdf/doc2807-16751.pdf",
+      "sourceType": "public receipt PDF",
+      "qualityNotes": "Rendered receipt page with a visible final balance."
+    },
+    {
+      "chain": "ShopRite",
+      "file": "receipts/shoprite-03.png",
+      "source": "https://www.matchinggrants.org/district/pdf/doc5470-29590.pdf",
+      "sourceType": "public receipt PDF",
+      "qualityNotes": "Rendered receipt page with a visible final balance."
+    },
+    {
+      "chain": "ShopRite",
+      "file": "receipts/shoprite-04.png",
+      "source": "https://www.matchinggrants.org/district/pdf/doc3656-19788.pdf",
+      "sourceType": "public receipt PDF crop",
+      "qualityNotes": "Receipt was cropped from a larger PDF page and contains obscured content."
+    },
+    {
+      "chain": "ShopRite",
+      "file": "receipts/shoprite-05.png",
+      "source": "https://www.matchinggrants.org/district/pdf/doc4113-22184.pdf",
+      "sourceType": "public receipt PDF",
+      "qualityNotes": "Digital receipt page shows item rows but not the final totals."
+    },
+    {
+      "chain": "Stop & Shop",
+      "file": "receipts/stop-shop-01.jpeg",
+      "source": "https://medium.com/tech-and-me/why-cant-we-have-better-receipts-855fd014cbfe",
+      "sourceType": "editorial receipt photo",
+      "qualityNotes": "Full receipt photographed at an angle."
+    },
+    {
+      "chain": "Stop & Shop",
+      "file": "receipts/stop-shop-02.png",
+      "source": "https://www.classaction.org/media/williams-v-the-stop-and-shop-supermarket-company-llc-et-al.pdf",
+      "sourceType": "public receipt PDF crop",
+      "qualityNotes": "Small receipt crop with visible total."
+    },
+    {
+      "chain": "Stop & Shop",
+      "file": "receipts/stop-shop-03.jpg",
+      "source": "https://www.thekitchn.com/grocery-diary-family-of-4-with-twins-23089070",
+      "sourceType": "editorial receipt photo",
+      "qualityNotes": "Receipt is small within a grocery photograph."
+    },
+    {
+      "chain": "Stop & Shop",
+      "file": "receipts/stop-shop-04.jpg",
+      "source": "https://www.thekitchn.com/grocery-diary-family-of-4-with-twins-23089070",
+      "sourceType": "editorial receipt photo",
+      "qualityNotes": "Receipt is small and blurred within a grocery photograph."
+    },
+    {
+      "chain": "Stop & Shop",
+      "file": "receipts/stop-shop-05.png",
+      "source": "https://countryhillcasa.com/",
+      "sourceType": "receipt image",
+      "qualityNotes": "Receipt is cropped and contains coupon-formatted rows without all regular prices."
+    },
+    {
+      "chain": "Target",
+      "file": "receipts/target-01.jpeg",
+      "source": "https://medium.com/the-billfold/show-us-your-grocery-receipts-part-seven-target-e9a3a34c916a",
+      "sourceType": "editorial receipt photo",
+      "qualityNotes": "Long receipt with totals visible but payment footer incomplete."
+    },
+    {
+      "chain": "Target",
+      "file": "receipts/target-02.jpg",
+      "source": "https://local.yahoo.com/info-159635198-target-diamond-bar/",
+      "sourceType": "receipt photo",
+      "qualityNotes": "Receipt includes a small difference between printed total and final card balance."
+    },
+    {
+      "chain": "Target",
+      "file": "receipts/target-03.jpg",
+      "source": "https://www.numerade.com/",
+      "sourceType": "receipt photo",
+      "qualityNotes": "Receipt is cropped before the totals section."
+    },
+    {
+      "chain": "Target",
+      "file": "receipts/target-04.jpg",
+      "source": "https://www.letmeseethelabel.com/cleanbeautyandskincare/thisallstartedattarget",
+      "sourceType": "editorial receipt photo",
+      "qualityNotes": "Receipt is cropped before the totals section."
+    },
+    {
+      "chain": "Target",
+      "file": "receipts/target-05.png",
+      "source": "https://www.buzzfeed.com/audreyworboys/receipt-comparison-2020-vs-2022",
+      "sourceType": "receipt screenshot",
+      "qualityNotes": "Shopping-history style image; only part of the item list is visible."
+    },
+    {
+      "chain": "Walmart",
+      "file": "receipts/walmart-01.jpg",
+      "source": "https://www.artofit.org/image-gallery/walmart-receipt/",
+      "sourceType": "receipt photo",
+      "qualityNotes": "Short receipt with readable totals."
+    },
+    {
+      "chain": "Walmart",
+      "file": "receipts/walmart-02.png",
+      "source": "https://7news.com.au/lifestyle/internet-sad-as-shoppers-heartbreaking-receipt-detail-exposed-c-8662457",
+      "sourceType": "news receipt photo",
+      "qualityNotes": "Receipt contains a final payment amount that differs from the printed total."
+    },
+    {
+      "chain": "Walmart",
+      "file": "receipts/walmart-03.jpg",
+      "source": "https://linetery.weebly.com/blog/real-walmart-receipts-2021",
+      "sourceType": "receipt photo",
+      "qualityNotes": "Long receipt with readable arithmetic."
+    },
+    {
+      "chain": "Walmart",
+      "file": "receipts/walmart-04.png",
+      "source": "https://thekrazycouponlady.com/tips/money/walmart-overcharged-alabama-shoppers",
+      "sourceType": "receipt photo",
+      "qualityNotes": "Footer and date are partially obscured or missing."
+    },
+    {
+      "chain": "Walmart",
+      "file": "receipts/walmart-05.png",
+      "source": "https://www.passionforsavings.com/online/walmart-cash-back-offers/",
+      "sourceType": "receipt photo",
+      "qualityNotes": "Image is partially obscured and cropped before totals."
+    }
+  ]
+}

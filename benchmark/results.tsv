@@ -1,0 +1,30 @@
+aldi-01	OK	ALDI	06/02/21	34	78.67	5.44	84.11	84.11	3	2	18172	route
+aldi-02	OK			25	35.08	0	35.08	35.08	4	5	14659	route
+aldi-03	OK	ALDI	01/18/13	26	49.43	0.28	49.71	49.71	5	2	15753	route
+aldi-04	OK	ALDI STORES, College Road, KINGSTANDING	22.06.18	16	19.24	0.91	20.15	20.15	0	2	10743	route
+aldi-05	OK	ALDI		6	18.69	0.42	19.11	19.11	2	2	6252	route
+hannaford-01	OK	Hannaford		4	19.8	0.81	20.61	20.61	6	4	7930	route
+hannaford-02	OK	Hannaford		6	24.49	1.21	25.7	25.7	2	2	8829	route
+hannaford-03	OK	Hannaford		7	18.58	0.19	18.77	18.77	3	3	10081	isolated-direct-request
+hannaford-04	OK	Hannaford Food & Drug		17	34.8	0	34.8	34.8	1	4	10487	route
+hannaford-05	OK	Food Stamp Purchase	01/03/[?]	0			-3.28	7066.58	1	3	5221	isolated-direct-request
+shoprite-01	OK	ShopRite	7/23/25	6	46.53	0.18	46.71	46.71	7	4	14109	route
+shoprite-02	OK	ShopRite of STATEN ISLAND, NY	03/11/20 11:36am	24	275.79	2.04	277.83	277.83	25	4	20588	route
+shoprite-03	OK	ShopRite	02/20/25 06:37pm	23	73.21	2.55	75.76	75.76	3	4	19619	route
+shoprite-04	OK	ShopRite of Staten Island, NY		14	259.25	0.53	259.78	259.78	6	5	12152	route
+shoprite-05	OK	ShopRite of Veteran's Road #112	02/22/2022 18:36:00 PM	17	16				0	1	10963	route
+stop-shop-01	OK	STOP&SHOP	04/07/20	9		0	35.01	35.01	2	0	9697	isolated-direct-request
+stop-shop-02	OK	STOP&SHOP	05/26/24	3	10.09	0.06	10.15	10.15	5	2	7869	isolated-direct-request
+stop-shop-03	ERROR	Model returned incomplete or invalid JSON	-	-	-	-	-	-	-	-	-
+stop-shop-04	OK	STOP & SHOP		7					2	3	6017	isolated-direct-request
+stop-shop-05	OK			7	113.65	0	35.93	35.93	14	4	10327	isolated-direct-request
+target-01	OK	TARGET	2016-03-06 05:25 PM	35	246	17.38	251.83		15	2	19112	isolated-direct-request
+target-02	OK	Target	04/14/2026 09:09 AM	21	99.37	3.66	93.59	93.54	5	3	19684	isolated-direct-request
+target-03	OK	Target	10/09/2020 07:18 PM	14					3	3	11081	isolated-direct-request
+target-04	OK	TARGET	06/18/2018 08:34 PM	10					2	2	8846	isolated-direct-request
+target-05	OK	Target	Aug 7, 2020	6			81.45		0	3	6029	isolated-direct-request
+walmart-01	OK	Walmart	01/16/24 19:13:01	4	19.92	1.34	21.26	21.26	4	1	7244	isolated-direct-request
+walmart-02	OK		01/11/20	23	112.45	6.52	118.97	120	3	0	15138	isolated-direct-request
+walmart-03	OK	Walmart	06/01/16 19:37:01	31	91.92	1.1	93.02	93.02	5	0	17585	isolated-direct-request
+walmart-04	OK	Walmart		13	26.87	1.61	28.48	28.48	3	2	27681	isolated-direct-request
+walmart-05	OK	Walmart		19					0	3	12265	isolated-direct-request
