@@ -21,6 +21,6 @@ Tillmark is a focused Next.js + TypeScript demonstration of a residential food-o
 - OpenAI Responses API image input with strict structured JSON output.
 - Merchant, date, currency, totals, line items, quantities, units, confidence, and review flags.
 - Raw OCR text remains inspectable in the UI.
-- Demo actions persist only in this browser session. There is no production database, authentication, Stripe Issuing, or live inventory system yet.
+- Demo actions are stored locally in this browser. There is no production database, authentication, Stripe Issuing, or live inventory system yet.
 
 The API request sets `store: false`; add authentication, rate limiting, and deployment secrets before exposing this beyond a private demo.

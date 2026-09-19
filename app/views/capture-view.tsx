@@ -329,7 +329,8 @@ function reportMoney(value: number | null) {
   return value == null ? "n/a" : themeMoney(value);
 }
 
-const maxUploadBytes = 3.5 * 1024 * 1024;
+const maxUploadBytes = 10 * 1024 * 1024;
+const supportedImageTypes = new Set(["image/jpeg", "image/png", "image/webp"]);
 const customCatalogStorageKey = "tillmark-custom-grocery-catalog";
 
 function isCatalogItem(value: unknown): value is GroceryCatalogItem {
@@ -414,6 +415,7 @@ function buildDevReport(receipt: Receipt, rawText: string, receiptSource: Receip
     `- File: ${fileContext}`,
     `- Page: ${window.location.pathname}`,
     `- Browser: ${navigator.userAgent}`,
+    "- Demo catalog state: stored locally in this browser",
     "",
     "## Summary",
     `- Merchant: ${reportCell(receipt.merchant)}`,
@@ -495,7 +497,7 @@ export default function CaptureView() {
   const [busy, setBusy] = useState(false);
   const [scanPhase, setScanPhase] = useState<ScanPhase>("idle");
   const [refining, setRefining] = useState(false);
-  const [reportCopied, setReportCopied] = useState(false);
+  const [isDragOver, setIsDragOver] = useState(false);
   const [cameraState, setCameraState] = useState<"checking" | "ready" | "unsupported" | "denied">("checking");
   const [cameraAspectRatio, setCameraAspectRatio] = useState(4 / 3);
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -503,6 +505,7 @@ export default function CaptureView() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const scanLoadingRef = useRef<HTMLDivElement>(null);
   const resultsPanelRef = useRef<HTMLDivElement>(null);
+  const resultHeadingRef = useRef<HTMLHeadingElement>(null);
   const scanRequestRef = useRef(0);
   const catalogItemsRef = useRef<GroceryCatalogItem[]>(benchmarkGroceryCatalog);
   const resultsScrollRef = useRef(false);
@@ -525,10 +528,12 @@ export default function CaptureView() {
       resultsScrollRef.current = false;
       return;
     }
-    if (receiptSource === "demo" || resultsScrollRef.current) return;
-    resultsScrollRef.current = true;
     const frame = window.requestAnimationFrame(() => {
-      resultsPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      if (receiptSource !== "demo" && !resultsScrollRef.current) {
+        resultsScrollRef.current = true;
+        resultsPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+      resultHeadingRef.current?.focus({ preventScroll: true });
     });
     return () => window.cancelAnimationFrame(frame);
   }, [receipt, receiptSource]);
@@ -558,7 +563,7 @@ export default function CaptureView() {
   }, []);
 
   async function startCamera() {
-    if (!navigator.mediaDevices?.getUserMedia) {
+    if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) {
       setCameraState("unsupported");
       return;
     }
@@ -595,12 +600,25 @@ export default function CaptureView() {
   }, [cameraState]);
 
   useEffect(() => {
-    void startCamera();
+    void startCamera().catch(() => setCameraState("unsupported"));
     return () => streamRef.current?.getTracks().forEach((track) => track.stop());
   }, []);
 
+  function validateReceiptFile(nextFile: File) {
+    if (!supportedImageTypes.has(nextFile.type)) return "Receipt must be a JPG, PNG, or WebP image.";
+    if (nextFile.size > maxUploadBytes) return "Receipt image must be 10 MB or smaller.";
+    return null;
+  }
+
   function chooseFile(nextFile: File | undefined, source: ReceiptSource = "upload") {
     if (!nextFile) return;
+    const validationError = validateReceiptFile(nextFile);
+    if (validationError) {
+      setIsDragOver(false);
+      setError(validationError);
+      setStatus("Choose a supported receipt image");
+      return;
+    }
     const requestId = ++scanRequestRef.current;
     setError(null);
     setReceipt(null);
@@ -609,7 +627,6 @@ export default function CaptureView() {
     setRefining(false);
     setScanPhase("scanning");
     setReceiptSource(source);
-    setReportCopied(false);
     setFile(nextFile);
     setPreview(URL.createObjectURL(nextFile));
     setStatus("Starting fast scan...");
@@ -627,7 +644,6 @@ export default function CaptureView() {
     setRefining(false);
     setScanPhase("complete");
     setReceiptSource("demo");
-    setReportCopied(false);
     setRawText(demoReceipt.lines.map((line) => line.rawText).join("\n"));
     setError(null);
     setStatus("Demo receipt loaded");
@@ -644,7 +660,6 @@ export default function CaptureView() {
     setBusy(false);
     setRefining(false);
     setScanPhase("idle");
-    setReportCopied(false);
     setRawText("");
     setError(null);
     setReceiptSource("upload");
@@ -666,7 +681,18 @@ export default function CaptureView() {
 
   function onDrop(event: DragEvent<HTMLLabelElement>) {
     event.preventDefault();
+    setIsDragOver(false);
     chooseFile(event.dataTransfer.files?.[0]);
+  }
+
+  function onDragOver(event: DragEvent<HTMLLabelElement>) {
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "copy";
+    setIsDragOver(true);
+  }
+
+  function onDragLeave(event: DragEvent<HTMLLabelElement>) {
+    if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setIsDragOver(false);
   }
 
   async function extractFile(receiptFile: File, source: ReceiptSource, requestId: number) {
@@ -734,8 +760,13 @@ export default function CaptureView() {
     }
   }
 
-  async function copyDevReport() {
-    if (!receipt) return;
+  async function copyDevReport(respond?: (result: { ok: boolean; message: string }) => void) {
+    if (!receipt) {
+      const message = "Load a receipt in Capture before copying its development report.";
+      setError(message);
+      respond?.({ ok: false, message });
+      return;
+    }
     const report = buildDevReport(receipt, rawText, receiptSource, file);
     try {
       if (navigator.clipboard?.writeText) {
@@ -752,13 +783,25 @@ export default function CaptureView() {
         textarea.remove();
         if (!copied) throw new Error("Clipboard access is unavailable.");
       }
-      setReportCopied(true);
-      setStatus("Dev report copied to clipboard");
-      window.setTimeout(() => setReportCopied(false), 2500);
+      const message = "Development report copied";
+      setStatus(message);
+      respond?.({ ok: true, message });
     } catch {
-      setError("Could not copy the dev report. Check clipboard permissions and try again.");
+      const message = "Could not copy the development report. Check clipboard permissions and try again.";
+      setError(message);
+      respond?.({ ok: false, message });
     }
   }
+
+  useEffect(() => {
+    function handleDevReportRequest(event: Event) {
+      const request = (event as CustomEvent<{ handled: boolean; respond: (result: { ok: boolean; message: string }) => void }>).detail;
+      request.handled = true;
+      void copyDevReport(request.respond);
+    }
+    window.addEventListener("tillmark:copy-dev-report", handleDevReportRequest);
+    return () => window.removeEventListener("tillmark:copy-dev-report", handleDevReportRequest);
+  }, [file, rawText, receipt, receiptSource]);
 
   function captureAndExtract() {
     const video = videoRef.current;
@@ -779,6 +822,26 @@ export default function CaptureView() {
       ...current,
       [index]: { ...current[index], ...patch, manual: true },
     }));
+  }
+
+  function commitQuantity(index: number, rawQuantity: string) {
+    const quantity = Number(rawQuantity.trim());
+    if (!rawQuantity.trim() || !Number.isFinite(quantity) || quantity <= 0) {
+      const fallback = receipt?.lines[index]?.quantity;
+      setLineEdits((current) => ({ ...current, [index]: { ...current[index], quantity: fallback == null ? "" : String(fallback) } }));
+      setError("Quantity must be a number greater than zero before it can be saved.");
+      setStatus("Quantity needs review");
+      return;
+    }
+    updateLine(index, { quantity: String(quantity) });
+    setError(null);
+    setStatus(`Updated quantity for ${getReviewLine(receipt!.lines[index], index, lineEdits, catalogItems).title}`);
+  }
+
+  function commitLineField(index: number, patch: LineEdit, label: string) {
+    updateLine(index, patch);
+    setError(null);
+    setStatus(`Updated ${label}`);
   }
 
   function removeLine(index: number) {
@@ -894,6 +957,8 @@ export default function CaptureView() {
         manual: Boolean(catalogId),
       },
     }));
+    setError(null);
+    setStatus(catalogId ? "Updated catalog match" : "Catalog match cleared");
   }
 
   const reconciliation = receipt ? getReconciliation(receipt) : null;
@@ -914,17 +979,18 @@ export default function CaptureView() {
           {cameraState === "ready" ? <><video ref={videoRef} autoPlay playsInline muted style={{ aspectRatio: cameraAspectRatio }} className="camera-view" /><button className="camera-button" onClick={captureAndExtract} disabled={busy}>{busy ? "Processing..." : "Capture receipt"}<span>O</span></button></> : <div className="camera-placeholder"><span className="camera-glyph">O</span><strong>{cameraState === "checking" ? "Checking for camera..." : "Camera unavailable"}</strong><small>{cameraState === "denied" ? "Allow camera access to scan directly, or upload a photo below." : "Use the upload option below on this device."}</small>{cameraState === "denied" && <button className="text-button" onClick={() => void startCamera()}>Try camera again</button>}</div>}
         </div>
         <div className="capture-divider"><span>or upload a photo</span></div>
-        <label className={`dropzone ${file ? "has-file" : ""}`} onDragOver={(event) => event.preventDefault()} onDrop={onDrop}>
+        <label className={`dropzone ${file ? "has-file" : ""} ${isDragOver ? "is-drag-over" : ""}`} onDragOver={onDragOver} onDragEnter={onDragOver} onDragLeave={onDragLeave} onDrop={onDrop}>
           <input ref={fileInputRef} type="file" accept="image/jpeg,image/png,image/webp" onChange={onFileChange} />
           {preview ? <img src={preview} alt="Selected receipt" /> : <span className="upload-glyph">＋</span>}
-          <strong>{file ? file.name : "Drop a receipt photo here"}</strong>
+          <strong>{isDragOver ? "Release to add this receipt" : file ? file.name : "Drop a receipt photo here"}</strong>
           <small>JPG, PNG, or WebP · max 10 MB</small>
-          <span className="browse">Choose a file</span>
+          <span className="browse">{file ? "Choose a replacement" : "Choose a file"}</span>
         </label>
+        {file && <button className="clear-image-button" type="button" onClick={resetScan}>Clear selected image</button>}
         <button className="demo-load-button" type="button" onClick={loadDemoReceipt}><span>Load catalog demo</span><small>ShopRite · benchmark item matching</small><span>↗</span></button>
-        <div className="status-line"><span className={`status-dot ${busy ? "busy" : ""}`} /><span>{status}</span></div>
+        <div className="status-line" role="status" aria-live="polite"><span className={`status-dot ${busy ? "busy" : ""}`} /><span>{status}</span></div>
         {error && <div className="error-box" role="alert">{error}</div>}
-        <p className="privacy-note">Uploaded images are processed for this request only. Demo data is stored in this browser session.</p>
+        <p className="privacy-note">Uploaded images are processed for this request only. Demo data is stored locally in this browser.</p>
       </div>
       <div className={`results-panel ${scanPhase === "scanning" && !receipt ? "is-scanning" : ""}`} ref={resultsPanelRef}>
         {!receipt ? scanPhase === "scanning" && preview ? <div className="scan-loading-stage" ref={scanLoadingRef} role="status" aria-live="polite">
@@ -940,7 +1006,7 @@ export default function CaptureView() {
           <div className="scan-loading-copy"><span className="eyebrow">Fast pass · enhanced image</span><h2>Reading the receipt.</h2><p>Finding the merchant, totals, and first set of line items now.</p><div className="scan-progress"><i /></div><small>Results will appear as soon as the first pass is ready.</small></div>
         </div> : <div className="empty-result"><span className="empty-index">Capture</span><h2>Extraction appears here.</h2><p>Merchant, date, totals, and line items will be returned together.</p><div className="empty-flow"><span>Receipt</span><i>→</i><span>Products</span><i>→</i><span>Purchasing signal</span></div></div> : <>
           {refining && <div className="refinement-banner" role="status" aria-live="polite"><span className="refinement-mark" aria-hidden="true"><i /></span><div><strong>Still improving this scan</strong><p>The first read needs a closer look, so we’re checking the original image against the enhanced version.</p></div><span className="refinement-dots" aria-hidden="true">···</span></div>}
-          <div className="result-header"><div><p className="eyebrow">{receiptSource === "demo" ? "Seeded demo extraction" : "Latest extraction"}</p><h2>{receipt.merchant ?? "Unknown merchant"}</h2><p className="result-date">{receipt.date ?? "Date not found"} <span>·</span> {receipt.lines.length} products identified</p></div><div className="result-actions"><span className={`confidence-badge ${isReconciled ? "is-reconciled" : ""}`}>{averageConfidence}% extraction confidence</span><button className="quiet-button report-button" type="button" onClick={() => void copyDevReport()}>{reportCopied ? "Report copied" : "Copy dev report"} <span aria-hidden="true">↗</span></button><button className="secondary-button" type="button" onClick={resetScan} disabled={busy}>Scan another receipt <span aria-hidden="true">↗</span></button></div></div>
+          <div className="result-header"><div><p className="eyebrow">{receiptSource === "demo" ? "Seeded demo extraction" : "Latest extraction"}</p><h2 ref={resultHeadingRef} tabIndex={-1}>{receipt.merchant ?? "Unknown merchant"}</h2><p className="result-date">{receipt.date ?? "Date not found"} <span>·</span> {receipt.lines.length} products identified</p></div><div className="result-actions"><span className={`confidence-badge ${isReconciled ? "is-reconciled" : ""}`}>{averageConfidence}% extraction confidence</span><button className="secondary-button" type="button" onClick={resetScan} disabled={busy}>Scan another receipt <span aria-hidden="true">↗</span></button></div></div>
           <div className="totals"><div className="total-primary"><span>Total paid</span><strong>{themeMoney(receipt.total ?? receipt.balance)}</strong><small>{receipt.total != null ? "Receipt total" : "Balance captured from receipt"}</small></div><div><span>Subtotal</span><strong>{themeMoney(receipt.subtotal)}</strong><small>After discounts</small></div><div><span>Tax</span><strong>{themeMoney(receipt.tax)}</strong><small>Applied at checkout</small></div></div>
           <div className={`receipt-status ${isReconciled ? "is-reconciled" : "is-review"}`} role="status"><span className="receipt-status-mark" aria-hidden="true">{isReconciled ? "✓" : "!"}</span><div><strong>{isReconciled ? "Receipt totals reconcile" : "Review recommended"}</strong><p>{isReconciled ? `${receipt.lines.length} products, ${couponCount(receipt)} coupons, and tax are accounted for.` : "Some receipt values still need confirmation before this purchase is used."}</p></div>{receipt.warnings.length > 0 && <details className="review-details"><summary>{receipt.warnings.length} review {receipt.warnings.length === 1 ? "note" : "notes"}</summary><ul>{receipt.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul></details>}</div>
           <div className="line-table"><div className="table-head"><span>Product</span><span>Amount bought</span><span>Receipt amount</span><span>Review</span></div>{receipt.lines.map((line, index) => {
@@ -964,12 +1030,12 @@ export default function CaptureView() {
               </span>
               <span className="product-meta">
                 <span className="quantity-unit" aria-label="Amount bought">
-                  <input className="line-input quantity-input" inputMode="decimal" aria-label={`Quantity for ${reviewLine.title}`} value={reviewLine.quantity} placeholder="—" onChange={(event) => updateLine(index, { quantity: event.target.value })} />
-                  <input className="line-input unit-input" aria-label={`Unit for ${reviewLine.title}`} list={selectedUnitList} value={reviewLine.unit} placeholder="unitless" onChange={(event) => updateLine(index, { unit: event.target.value })} />
+                  <input className="line-input quantity-input" inputMode="decimal" type="number" min="0.01" step="any" aria-label={`Quantity for ${reviewLine.title}`} value={reviewLine.quantity} placeholder="—" onChange={(event) => updateLine(index, { quantity: event.target.value })} onBlur={(event) => commitQuantity(index, event.currentTarget.value)} />
+                  <input className="line-input unit-input" aria-label={`Unit for ${reviewLine.title}`} list={selectedUnitList} value={reviewLine.unit} placeholder="unitless" onChange={(event) => updateLine(index, { unit: event.target.value })} onBlur={(event) => commitLineField(index, { unit: event.currentTarget.value }, `unit for ${reviewLine.title}`)} />
                 </span>
                 {reviewLine.item && <datalist id={`unit-options-${index}`}>{reviewLine.item.units.map((unit) => <option value={unit} key={unit} />)}</datalist>}
                 <span className="select-shell category-select-shell">
-                  <select className="line-select category-select" aria-label={`Category for ${reviewLine.title}`} value={reviewLine.category} onChange={(event) => updateLine(index, { category: event.target.value })}>
+                  <select className="line-select category-select" aria-label={`Category for ${reviewLine.title}`} value={reviewLine.category} onChange={(event) => commitLineField(index, { category: event.target.value }, `category for ${reviewLine.title}`)}>
                     {groceryCategories.map((category) => <option value={category} key={category}>{category}</option>)}
                   </select>
                   <span aria-hidden="true">⌄</span>
@@ -992,7 +1058,7 @@ export default function CaptureView() {
             </div>
             <div className="reconciliation-summary" aria-label="Subtotal calculation"><div className="reconciliation-heading"><span>Receipt math</span><strong className={isReconciled ? "reconciliation-ok" : "reconciliation-discount"}>{isReconciled ? "✓ Totals reconcile" : "Review totals"}</strong></div><div className="reconciliation-grid"><div><span>Product total</span><strong>{themeMoney(reconciliation?.productTotal ?? null)}</strong><small>Before coupons</small></div><div><span>Coupons / discounts</span><strong className="reconciliation-discount">{(reconciliation?.discountTotal ?? 0) > 0 ? `−${themeMoney(reconciliation?.discountTotal ?? 0)}` : themeMoney(0)}</strong><small>Applied to product total</small></div>{(reconciliation?.bagFee ?? 0) > 0 && <div><span>Paper bags</span><strong>{themeMoney(reconciliation?.bagFee ?? 0)}</strong><small>Assumed at $0.05 each</small></div>}<div><span>Calculated subtotal</span><strong>{themeMoney(reconciliation?.calculatedSubtotal ?? null)}</strong><small>Product total minus coupons and bags</small></div></div></div>
           </div>
-          <details className="raw-details"><summary>Developer details · raw OCR and report tools</summary><div className="developer-actions"><button className="quiet-button" type="button" onClick={() => void copyDevReport()}>{reportCopied ? "Report copied" : "Copy full Markdown report"}<span aria-hidden="true">↗</span></button></div><pre>{rawText || "No transcribed receipt text returned."}</pre></details>
+          <details className="raw-details"><summary>Developer details · raw OCR</summary><pre>{rawText || "No transcribed receipt text returned."}</pre></details>
           <PurchaseAnalysis receiptSource={receiptSource} catalogItems={catalogItems} unidentifiedCount={unidentifiedCount} />
         </>}
       </div>

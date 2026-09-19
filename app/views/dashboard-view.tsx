@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { useDemoState } from "../components/demo-context";
+import { useDashboardState } from "../components/demo-context";
 import { PurchaseReviewDialog } from "../components/purchase-review-dialog";
 import { PageHeading } from "./page-heading";
 
@@ -24,14 +24,14 @@ const homeSeed: Omit<Home, "openActions" | "status">[] = [
   { name: "River House", spend: 2465, waste: "4.7%", purchases: [{ item: "Family groceries", retailer: "ShopRite", amount: "$66.03", date: "Sep 17" }, { item: "Bakery and produce", retailer: "Wegmans", amount: "$28.42", date: "Sep 11" }], issues: [] },
 ];
 
-const spendByRetailer = [{ name: "ShopRite", amount: "$9,806", share: 53 }, { name: "Wegmans", amount: "$5,742", share: 31 }, { name: "Target", amount: "$1,984", share: 11 }, { name: "Other", amount: "$889", share: 5 }];
+const spendByRetailer = [{ name: "ShopRite", amount: "$9,806", share: 53 }, { name: "Wegmans", amount: "$5,742", share: 31 }, { name: "Target", amount: "$1,984", share: 11 }, { name: "Other", amount: "$888", share: 5 }];
 
 export default function DashboardView() {
-  const { anomalyStatus, milkOutcome, stockCount } = useDemoState();
+  const { anomalyStatus, stockCount, setAnomalyStatus } = useDashboardState();
   const [selectedHome, setSelectedHome] = useState<string | null>(null);
   const [reviewOpen, setReviewOpen] = useState(false);
   const reviewOpenCount = anomalyStatus === "needs-review" ? 1 : 0;
-  const operationalActions = (milkOutcome ? 0 : 1) + (stockCount == null ? 1 : 0);
+  const operationalActions = 2;
   const homes: Home[] = homeSeed.map((home) => {
     if (home.name === "Maple House") {
       const openActions = reviewOpenCount + operationalActions;
@@ -56,10 +56,10 @@ export default function DashboardView() {
 
     <section className="dashboard-grid">
       <div className="panel breakdown-panel"><div className="section-heading-row"><div><p className="eyebrow">Spend by home</p><h2>Where money is moving</h2></div><span className="panel-note">MTD</span></div><div className="bar-list">{homes.map((home) => <div className="bar-row" key={home.name}><div><span>{home.name}</span><strong>${home.spend.toLocaleString()}</strong></div><div className="bar-track"><i style={{ width: `${Math.round((home.spend / 4218) * 100)}%` }} /></div></div>)}</div></div>
-      <div className="panel breakdown-panel"><div className="section-heading-row"><div><p className="eyebrow">Spend by retailer</p><h2>Where purchases happen</h2></div><span className="panel-note">MTD</span></div><div className="retailer-list">{spendByRetailer.map((retailer) => <div className="retailer-row" key={retailer.name}><div><strong>{retailer.name}</strong><span>{retailer.share}% of spend</span></div><strong>{retailer.amount}</strong></div>)}</div><div className="waste-callout"><span>Waste by home</span><strong>Maple House is highest at 6.8%</strong><small>Use the To-Do list to close the storage review.</small></div></div>
+      <div className="panel breakdown-panel"><div className="section-heading-row"><div><p className="eyebrow">Spend by retailer</p><h2>Where purchases happen</h2></div><span className="panel-note">MTD</span></div><div className="retailer-list">{spendByRetailer.map((retailer) => <div className="retailer-row" key={retailer.name}><div><strong>{retailer.name}</strong><span>{retailer.share}% of spend</span></div><strong>{retailer.amount}</strong></div>)}</div><div className="waste-callout"><span>Waste by home</span><strong>Maple House is highest at 6.8%</strong><small>Storage review is shown as a separate seeded manager signal.</small></div></div>
     </section>
 
     <section className="panel homes-panel"><div className="section-heading-row"><div><p className="eyebrow">Six-home view</p><h2>Homes and open actions</h2></div><span className="panel-note">Select a home for detail</span></div><div className="home-table"><div className="home-table-head"><span>Home</span><span>Spending</span><span>Waste</span><span>Open actions</span><span>Status</span></div>{homes.map((home) => <div className={`home-row ${selectedHome === home.name ? "selected" : ""}`} key={home.name}><button className="home-name" type="button" onClick={() => setSelectedHome(selectedHome === home.name ? null : home.name)} aria-expanded={selectedHome === home.name}><strong>{home.name}</strong><small>{home.purchases.length} recent purchases</small></button><span>{`$${home.spend.toLocaleString()}`}</span><span>{home.waste}</span><span>{home.openActions || "None"}</span><span className={`status-chip ${home.status === "Needs review" ? "warning" : home.status === "Watch" ? "watch" : "success"}`}>{home.status}</span></div>)}</div>{selected ? <div className="home-detail"><div><p className="eyebrow">{selected.name}</p><h3>Recent activity</h3>{selected.purchases.map((purchase) => <div className="activity-row" key={`${purchase.item}-${purchase.date}`}><span><strong>{purchase.item}</strong><small>{purchase.retailer} · {purchase.date}</small></span><strong>{purchase.amount}</strong></div>)}</div><div><h3>Outstanding issues</h3>{selectedIssues.length ? <ul className="issue-list">{selectedIssues.map((issue) => <li key={issue}>{issue}{issue.startsWith("Tide") && <button className="inline-action" type="button" onClick={() => setReviewOpen(true)}>Review</button>}</li>)}</ul> : <p className="muted-copy">No open issues for this home.</p>}</div></div> : <p className="table-hint">Select a home to see recent purchases and outstanding issues.</p>}</section>
-    <PurchaseReviewDialog open={reviewOpen} onClose={() => setReviewOpen(false)} />
+    <PurchaseReviewDialog open={reviewOpen} onClose={() => setReviewOpen(false)} status={anomalyStatus} onStatusChange={setAnomalyStatus} />
   </>;
 }

@@ -157,8 +157,6 @@ a { color: inherit; }
 .result-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
 .confidence-badge { background: var(--soft); color: var(--muted); font: 10px monospace; padding: 8px 10px; border-radius: 6px; white-space: nowrap; }
 .confidence-badge.is-reconciled { background: var(--accent-light); color: var(--accent); }
-.report-button { padding: 8px 2px; color: var(--muted); font-size: 10px; }
-.report-button:hover { color: var(--accent); }
 .totals { display: grid; grid-template-columns: 1.25fr 1fr 1fr; gap: 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); margin-top: 27px; padding: 20px 0; }
 .totals > div { min-width: 0; padding: 0 20px; }
 .totals > div:first-child { padding-left: 0; }
@@ -232,7 +230,6 @@ a { color: inherit; }
 .reconciliation-discount { color: var(--warn); }
 .raw-details { margin-top: 22px; border-top: 1px solid var(--line); padding-top: 15px; color: var(--muted); font-size: 10px; }
 .raw-details summary { cursor: pointer; color: var(--ink); font-weight: 700; }
-.developer-actions { margin-top: 12px; }
 .raw-details pre { white-space: pre-wrap; max-height: 220px; overflow: auto; background: var(--soft); color: var(--ink); padding: 12px; border-radius: 7px; font: 10px/1.5 monospace; }
 
 .analysis-section { border-top: 1px solid var(--line); margin-top: 28px; padding-top: 24px; }
@@ -502,6 +499,68 @@ footer { display: flex; justify-content: space-between; gap: 20px; border-top: 1
   .table-head, .table-row { grid-template-columns: 1.35fr .85fr .42fr .42fr; }
   .manual-line-form { grid-template-columns: repeat(3, minmax(110px, 1fr)); }
   .manual-add-button { min-height: 34px; }
+}
+
+/* Presentation and interaction refinements */
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+.dropzone { transition: border-color .2s ease, background-color .2s ease, transform .2s ease; }
+.dropzone.is-drag-over { border-color: var(--accent); background: var(--accent-light); transform: translateY(-1px); }
+.clear-image-button { width: 100%; margin-top: 8px; border: 1px solid var(--line); border-radius: 8px; background: transparent; color: var(--muted); padding: 10px 12px; font-size: 11px; font-weight: 700; }
+.clear-image-button:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-light); }
+.footer-feedback { color: var(--accent); font-size: 10px; text-transform: none; letter-spacing: normal; }
+.footer-feedback.is-error { color: var(--error-ink); }
+.home-name { min-height: 42px; justify-content: center; }
+.task-button { min-height: 42px; }
+.task-button.selected { border-color: var(--accent); background: var(--accent-light); color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.task-confirmation { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); color: var(--muted); font-size: 11px; }
+.task-confirmation .task-button { min-height: 36px; padding: 7px 10px; }
+.field-error { margin-top: 10px !important; color: var(--error-ink) !important; }
+.todo-empty { border: 1px dashed var(--drop-border); border-radius: 12px; padding: 24px; background: var(--soft); }
+.todo-empty strong { display: block; margin-top: 12px; font-size: 18px; }
+.todo-empty p { color: var(--muted); font-size: 11px; margin: 6px 0 0; }
+.review-dialog:focus { outline: none; }
+.result-header h2:focus { outline: 2px solid var(--accent); outline-offset: 6px; border-radius: 3px; }
+
+/* Kitchen uses the remaining viewport as a bounded tablet console. */
+.is-kitchen-route footer { display: none; }
+.kitchen-route { min-height: calc(100vh - 70px); min-height: calc(100svh - 70px); display: flex; flex-direction: column; }
+.kitchen-route .page-heading { flex: 0 0 auto; padding: 25px 0 18px; }
+.kitchen-route .page-heading h1 { font-size: clamp(34px, 4vw, 52px); }
+.kitchen-route .page-description { max-width: 620px; margin-top: 10px; font-size: 12px; }
+.kitchen-route .kitchen-screen { flex: 1 1 auto; min-height: 0; max-height: calc(100vh - 160px); max-height: calc(100svh - 160px); display: flex; flex-direction: column; }
+.kitchen-route .kitchen-layout { flex: 1 1 auto; min-height: 0; }
+.kitchen-route .meal-summary, .kitchen-route .kitchen-step { min-height: 0; }
+.kitchen-route .meal-summary { padding: 30px 36px; }
+.kitchen-route .kitchen-step { overflow-y: auto; padding: 32px 46px; }
+.kitchen-route .kitchen-step h3 { font-size: clamp(27px, 3.3vw, 46px); }
+.safety-confirm { display: flex; align-items: flex-start; gap: 9px; margin-top: 15px; color: var(--ink); font-size: 11px; line-height: 1.4; cursor: pointer; }
+.safety-confirm input { width: 18px; height: 18px; flex: 0 0 auto; accent-color: var(--accent); }
+.kitchen-primary:disabled { opacity: .4; cursor: not-allowed; }
+.portion-grid button.selected { border-color: var(--accent); background: var(--accent-light); color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.portion-grid button:focus-visible, .safety-confirm input:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.kitchen-orientation-gate { display: none; }
+
+@media (max-width: 1050px) {
+  .is-kitchen-route .kitchen-route { min-height: calc(100vh - 110px); min-height: calc(100svh - 110px); }
+  .is-kitchen-route .kitchen-screen { max-height: calc(100vh - 200px); max-height: calc(100svh - 200px); }
+}
+
+@media (orientation: landscape) and (max-width: 850px) {
+  .kitchen-route .kitchen-layout { grid-template-columns: .78fr 1.22fr; }
+  .kitchen-route .meal-summary { min-height: 0; padding: 22px 24px; }
+  .kitchen-route .meal-summary h2 { font-size: clamp(27px, 5vw, 40px); }
+  .kitchen-route .kitchen-step { min-height: 0; padding: 23px 28px; }
+  .kitchen-route .kitchen-step h3 { font-size: clamp(25px, 5vw, 39px); }
+  .kitchen-route .step-copy { font-size: 12px; }
+  .kitchen-route .kitchen-primary { padding: 12px 15px; min-height: 44px; }
+}
+
+@media (orientation: portrait) and (hover: none) and (max-width: 1100px) {
+  .kitchen-orientation-gate { position: fixed; inset: 0; z-index: 30; place-items: center; padding: 24px; background: var(--paper); color: var(--ink); }
+  .orientation-card { width: min(100%, 360px); text-align: center; }
+  .rotate-device { display: grid; place-items: center; width: 64px; height: 64px; margin: 0 auto 24px; border: 1px solid var(--accent); border-radius: 16px; color: var(--accent); font-size: 38px; }
+  .orientation-card h2 { margin: 0; font-size: 36px; letter-spacing: -.06em; }
+  .orientation-card > p:last-child { color: var(--muted); font-size: 13px; line-height: 1.6; }
 }
 @media (max-width: 560px) {
   .table-head span:nth-child(2), .table-row > span:nth-child(2) { display: block; }
