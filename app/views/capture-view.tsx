@@ -444,12 +444,15 @@ export default function CaptureView() {
   const [refining, setRefining] = useState(false);
   const [reportCopied, setReportCopied] = useState(false);
   const [cameraState, setCameraState] = useState<"checking" | "ready" | "unsupported" | "denied">("checking");
+  const [cameraAspectRatio, setCameraAspectRatio] = useState(4 / 3);
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const scanLoadingRef = useRef<HTMLDivElement>(null);
+  const resultsPanelRef = useRef<HTMLDivElement>(null);
   const scanRequestRef = useRef(0);
   const catalogItemsRef = useRef<GroceryCatalogItem[]>(benchmarkGroceryCatalog);
+  const resultsScrollRef = useRef(false);
 
   useEffect(() => {
     if (!preview) return;
@@ -463,6 +466,19 @@ export default function CaptureView() {
     });
     return () => window.cancelAnimationFrame(frame);
   }, [preview, receiptSource, scanPhase]);
+
+  useEffect(() => {
+    if (!receipt) {
+      resultsScrollRef.current = false;
+      return;
+    }
+    if (receiptSource === "demo" || resultsScrollRef.current) return;
+    resultsScrollRef.current = true;
+    const frame = window.requestAnimationFrame(() => {
+      resultsPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [receipt, receiptSource]);
 
   useEffect(() => {
     try {
@@ -505,6 +521,7 @@ export default function CaptureView() {
     const stream = streamRef.current;
     if (!video || !stream) return;
     if (video.srcObject !== stream) video.srcObject = stream;
+    if (video.videoWidth && video.videoHeight) setCameraAspectRatio(video.videoWidth / video.videoHeight);
     void video.play().catch(() => {
       // The muted, inline video should autoplay on supported mobile browsers.
     });
@@ -775,7 +792,7 @@ export default function CaptureView() {
     <section className={`workspace ${scanPhase === "scanning" && !receipt ? "is-scanning" : ""} ${scanPhase === "scanning" && !receipt && receiptSource === "camera" ? "is-camera-scan" : ""}`}>
       <div className="left-column">
         <div className="camera-card">
-          {cameraState === "ready" ? <><video ref={videoRef} autoPlay playsInline muted className="camera-view" /><button className="camera-button" onClick={captureAndExtract} disabled={busy}>{busy ? "Processing..." : "Capture receipt"}<span>O</span></button></> : <div className="camera-placeholder"><span className="camera-glyph">O</span><strong>{cameraState === "checking" ? "Checking for camera..." : "Camera unavailable"}</strong><small>{cameraState === "denied" ? "Allow camera access to scan directly, or upload a photo below." : "Use the upload option below on this device."}</small>{cameraState === "denied" && <button className="text-button" onClick={() => void startCamera()}>Try camera again</button>}</div>}
+          {cameraState === "ready" ? <><video ref={videoRef} autoPlay playsInline muted style={{ aspectRatio: cameraAspectRatio }} className="camera-view" /><button className="camera-button" onClick={captureAndExtract} disabled={busy}>{busy ? "Processing..." : "Capture receipt"}<span>O</span></button></> : <div className="camera-placeholder"><span className="camera-glyph">O</span><strong>{cameraState === "checking" ? "Checking for camera..." : "Camera unavailable"}</strong><small>{cameraState === "denied" ? "Allow camera access to scan directly, or upload a photo below." : "Use the upload option below on this device."}</small>{cameraState === "denied" && <button className="text-button" onClick={() => void startCamera()}>Try camera again</button>}</div>}
         </div>
         <div className="capture-divider"><span>or upload a photo</span></div>
         <label className={`dropzone ${file ? "has-file" : ""}`} onDragOver={(event) => event.preventDefault()} onDrop={onDrop}>
@@ -790,7 +807,7 @@ export default function CaptureView() {
         {error && <div className="error-box" role="alert">{error}</div>}
         <p className="privacy-note">Uploaded images are processed for this request only. Demo data is stored in this browser session.</p>
       </div>
-      <div className={`results-panel ${scanPhase === "scanning" && !receipt ? "is-scanning" : ""}`}>
+      <div className={`results-panel ${scanPhase === "scanning" && !receipt ? "is-scanning" : ""}`} ref={resultsPanelRef}>
         {!receipt ? scanPhase === "scanning" && preview ? <div className="scan-loading-stage" ref={scanLoadingRef} role="status" aria-live="polite">
           <div className="scan-visual">
             <img src={preview} alt="Receipt being scanned" />

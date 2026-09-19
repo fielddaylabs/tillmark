@@ -83,7 +83,7 @@ a { color: inherit; }
 .workspace.is-scanning { grid-template-columns: .58fr 1.7fr; }
 .left-column, .results-panel, .panel { border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); padding: 26px; }
 .camera-card { border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: #111; }
-.camera-view { display: block; width: 100%; aspect-ratio: 4 / 3; object-fit: cover; background: #111; }
+.camera-view { display: block; width: 100%; height: auto; object-fit: contain; background: #111; }
 .camera-button { width: 100%; padding: 14px 16px; border: 0; background: var(--ink); color: var(--paper); font-weight: 700; display: flex; justify-content: space-between; }
 .camera-button:disabled { opacity: .55; cursor: not-allowed; }
 .camera-placeholder { min-height: 235px; background: var(--soft); color: var(--muted); display: grid; place-items: center; align-content: center; gap: 8px; padding: 20px; text-align: center; }
