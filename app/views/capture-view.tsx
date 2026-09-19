@@ -1,8 +1,7 @@
 "use client";
 
 import { ChangeEvent, DragEvent, useEffect, useRef, useState } from "react";
-import { useDemoState } from "../components/demo-context";
-import { PurchaseReviewDialog } from "../components/purchase-review-dialog";
+import { benchmarkGroceryCatalog, catalogifyReceiptLines, findCatalogItem, groceryCategories, matchCatalogItem, GroceryCatalogItem } from "../data/grocery-catalog";
 import { PageHeading } from "./page-heading";
 
 type ReceiptLine = {
@@ -59,22 +58,39 @@ type Receipt = {
 type ReceiptSource = "demo" | "upload" | "camera";
 type ScanPhase = "idle" | "scanning" | "refining" | "complete";
 
+type LineEdit = {
+  catalogId?: string | null;
+  quantity?: string;
+  unit?: string;
+  category?: string;
+  manual?: boolean;
+};
+
+type ReviewLine = {
+  item: GroceryCatalogItem | null;
+  title: string;
+  quantity: string;
+  unit: string;
+  category: string;
+  manual: boolean;
+  needsReview: boolean;
+};
+
 const demoReceipt: Receipt = {
   merchant: "ShopRite",
   date: "Sep 18, 2026",
   currency: "USD",
-  subtotal: 55.61,
-  tax: 3.68,
-  total: 59.29,
-  balance: 59.29,
+  subtotal: 24.49,
+  tax: 0,
+  total: 24.49,
+  balance: 24.49,
   lines: [
-    { rawText: "TIDE PODS SPRING MEADOW 42 CT", description: "Tide Pods Spring Meadow, 42 ct", quantity: 1, unit: "each", unitPrice: 18.99, amount: 18.99, category: "Cleaning", confidence: 99, needsReview: false },
-    { rawText: "BONELESS CHICKEN BREAST", description: "Boneless chicken breast", quantity: 2.14, unit: "lb", unitPrice: 5.49, amount: 11.75, category: "Protein", confidence: 96, needsReview: false },
-    { rawText: "ROMAINE HEARTS 3 PK", description: "Romaine hearts, 3 pack", quantity: 1, unit: "each", unitPrice: 3.99, amount: 3.99, category: "Produce", confidence: 98, needsReview: false },
-    { rawText: "WHOLE MILK 1 GAL", description: "Whole milk, 1 gallon", quantity: 1, unit: "each", unitPrice: 4.29, amount: 4.29, category: "Dairy", confidence: 98, needsReview: false },
-    { rawText: "MILD MARINARA SAUCE", description: "Mild marinara sauce", quantity: 2, unit: "each", unitPrice: 3.29, amount: 6.58, category: "Pantry", confidence: 95, needsReview: false },
-    { rawText: "SHREDDED MOZZARELLA 16 OZ", description: "Shredded mozzarella, 16 oz", quantity: 1, unit: "each", unitPrice: 5.99, amount: 5.99, category: "Dairy", confidence: 97, needsReview: false },
-    { rawText: "ITALIAN BREAD", description: "Italian bread", quantity: 1, unit: "each", unitPrice: 4.02, amount: 4.02, category: "Bakery", confidence: 93, needsReview: false },
+    { rawText: "GOYA LENTILS 2.19 *", description: "Lentils", quantity: 1, unit: "package", unitPrice: 2.19, amount: 2.19, category: "Pantry", confidence: 98, needsReview: false },
+    { rawText: "GOYA BLACK BEANS / 2 @ 0.79 1.58 *", description: "Beans", quantity: 2, unit: "package", unitPrice: 0.79, amount: 1.58, category: "Pantry", confidence: 98, needsReview: false },
+    { rawText: "8PK/7.5OZ CN COKE / 1 @ 3 FOR 10.00 3.34 A *", description: "Coke Cans", quantity: 1, unit: "pack of 8 cans", unitPrice: 3.34, amount: 3.34, category: "Beverage", confidence: 96, needsReview: false },
+    { rawText: "4PK CN CITZ DRY C ID 13.99 A", description: null, quantity: 1, unit: null, unitPrice: 13.99, amount: 13.99, category: "Grocery", confidence: 78, needsReview: true },
+    { rawText: "BOTTLE DEPOSIT 0.40 *", description: "Bottle Deposit", quantity: 1, unit: null, unitPrice: 0.4, amount: 0.4, category: "Miscellaneous", confidence: 98, needsReview: false },
+    { rawText: "ORG GRAPE TOMATOES 2.99 *", description: "Organic Grape Tomatoes", quantity: 1, unit: "package", unitPrice: 2.99, amount: 2.99, category: "Produce", confidence: 94, needsReview: false },
   ],
   warnings: [],
 };
@@ -114,6 +130,45 @@ function displayCategory(line: ReceiptLine) {
 
 function lineNeedsReview(line: ReceiptLine) {
   return line.confidence < 90 || line.amount == null || !line.description;
+}
+
+function getReviewLine(line: ReceiptLine, index: number, edits: Record<number, LineEdit>): ReviewLine {
+  const edit = edits[index];
+  const hasCatalogOverride = edit && Object.prototype.hasOwnProperty.call(edit, "catalogId");
+  const item = hasCatalogOverride ? findCatalogItem(edit.catalogId) : matchCatalogItem(line.rawText, line.description);
+  const fallbackCategory = displayCategory(line);
+  return {
+    item,
+    title: item?.name ?? "Unidentified item",
+    quantity: edit?.quantity ?? (line.quantity != null ? String(line.quantity) : item ? "1" : ""),
+    unit: edit?.unit ?? line.unit ?? item?.defaultUnit ?? "",
+    category: edit?.category ?? item?.category ?? fallbackCategory,
+    manual: edit?.manual === true,
+    needsReview: !item || lineNeedsReview(line),
+  };
+}
+
+function catalogifyReceipt(receipt: Receipt): Receipt {
+  const adjustments = receipt.adjustments ?? [];
+  const hasDepositLine = receipt.lines.some((line) => matchCatalogItem(line.rawText, line.description)?.id === "bottle-deposit");
+  const depositAdjustments = hasDepositLine ? [] : adjustments.filter((adjustment) => /bottle\s*deposit|btl\/can\s*deposit/i.test(adjustment.rawText));
+  const promotedDepositLines: ReceiptLine[] = depositAdjustments.map((adjustment) => ({
+    rawText: adjustment.rawText,
+    description: "Bottle Deposit",
+    quantity: adjustment.amount == null ? null : 1,
+    unit: null,
+    unitPrice: adjustment.amount,
+    amount: adjustment.amount,
+    category: "Miscellaneous",
+    confidence: 100,
+    needsReview: adjustment.amount == null,
+  }));
+
+  return {
+    ...receipt,
+    lines: catalogifyReceiptLines([...receipt.lines, ...promotedDepositLines]),
+    adjustments: depositAdjustments.length ? adjustments.filter((adjustment) => !depositAdjustments.includes(adjustment)) : receipt.adjustments,
+  };
 }
 
 function shouldRefineReceipt(receipt: Receipt) {
@@ -263,17 +318,15 @@ function buildDevReport(receipt: Receipt, rawText: string, receiptSource: Receip
   ].join("\n");
 }
 
-function PurchaseAnalysis({ receiptSource, onReview }: { receiptSource: ReceiptSource; onReview: () => void }) {
-  const { anomalyStatus } = useDemoState();
-  const isSeeded = receiptSource === "demo";
-  const statusLabel = anomalyStatus === "needs-review" ? "Review required" : anomalyStatus === "approved" ? "Approved" : anomalyStatus === "investigate" ? "Investigation open" : "Review closed";
+function PurchaseAnalysis({ receiptSource }: { receiptSource: ReceiptSource }) {
+  const isCatalogDemo = receiptSource === "demo";
 
-  return <section className={`analysis-section ${isSeeded ? "is-flagged" : "is-clear"}`}>
-    <div className="section-heading-row"><div><p className="eyebrow">Purchasing analysis</p><h3>{isSeeded ? "One purchase needs a second look" : "Ready for purchasing signals"}</h3></div>{isSeeded ? <span className={`status-chip ${anomalyStatus === "needs-review" ? "warning" : "success"}`}>{statusLabel}</span> : <span className="status-chip neutral">History building</span>}</div>
-    {isSeeded ? <>
-      <div className="anomaly-callout"><div className="anomaly-mark">!</div><div><strong>Tide Pods · $18.99</strong><p>Same product was purchased 4 days ago. Expected normal replenishment is approximately 30 days.</p></div></div>
-      <div className="analysis-evidence"><div><span>Current purchase</span><strong>$18.99</strong><small>ShopRite · Sep 18, 2026</small></div><div><span>Previous purchase</span><strong>$18.99</strong><small>ShopRite · Sep 14, 2026</small></div><div><span>Time between</span><strong>4 days</strong><small>Expected: about 30 days</small></div></div>
-      <div className="analysis-footer"><p>Seeded comparison for the Tillmark board demo. A live receipt without seeded history will not be assigned an anomaly.</p><button className="secondary-button" type="button" onClick={onReview}>{anomalyStatus === "needs-review" ? "Review purchase" : "View review"}<span>↗</span></button></div>
+  return <section className="analysis-section is-clear">
+    <div className="section-heading-row"><div><p className="eyebrow">Purchasing analysis</p><h3>{isCatalogDemo ? "Benchmark catalog is active" : "Ready for purchasing signals"}</h3></div><span className={`status-chip ${isCatalogDemo ? "success" : "neutral"}`}>{isCatalogDemo ? "Catalog ready" : "History building"}</span></div>
+    {isCatalogDemo ? <>
+      <div className="catalog-callout"><div className="anomaly-mark">✓</div><div><strong>Brand-free item matching is on</strong><p>Five lines matched the benchmark catalog. The cider line stays unidentified until you choose the right item.</p></div></div>
+      <div className="analysis-evidence"><div><span>Catalog items</span><strong>{benchmarkGroceryCatalog.length}</strong><small>Brand-free options available</small></div><div><span>Editable units</span><strong>Per line</strong><small>Package, oz, lb, cans, and more</small></div><div><span>Manual review</span><strong>1 line</strong><small>Unidentified until confirmed</small></div></div>
+      <div className="analysis-footer"><p>Choosing an item, quantity, unit, or category records a manual edit for that line.</p></div>
     </> : <p className="analysis-empty-copy">Historical comparisons will appear here as purchase history accumulates. This receipt is ready to become part of that signal.</p>}
   </section>;
 }
@@ -282,6 +335,7 @@ export default function CaptureView() {
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const [receipt, setReceipt] = useState<Receipt | null>(null);
+  const [lineEdits, setLineEdits] = useState<Record<number, LineEdit>>({});
   const [receiptSource, setReceiptSource] = useState<ReceiptSource>("upload");
   const [rawText, setRawText] = useState("");
   const [status, setStatus] = useState("Ready for a receipt photo");
@@ -291,7 +345,6 @@ export default function CaptureView() {
   const [refining, setRefining] = useState(false);
   const [reportCopied, setReportCopied] = useState(false);
   const [cameraState, setCameraState] = useState<"checking" | "ready" | "unsupported" | "denied">("checking");
-  const [reviewOpen, setReviewOpen] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -329,6 +382,7 @@ export default function CaptureView() {
     const requestId = ++scanRequestRef.current;
     setError(null);
     setReceipt(null);
+    setLineEdits({});
     setRefining(false);
     setScanPhase("scanning");
     setReceiptSource(source);
@@ -344,7 +398,8 @@ export default function CaptureView() {
     setBusy(false);
     setFile(null);
     setPreview(null);
-    setReceipt(demoReceipt);
+    setReceipt(catalogifyReceipt(demoReceipt));
+    setLineEdits({});
     setRefining(false);
     setScanPhase("complete");
     setReceiptSource("demo");
@@ -360,6 +415,7 @@ export default function CaptureView() {
     setFile(null);
     setPreview(null);
     setReceipt(null);
+    setLineEdits({});
     setBusy(false);
     setRefining(false);
     setScanPhase("idle");
@@ -413,7 +469,7 @@ export default function CaptureView() {
       setStatus("Reading enhanced image...");
       const firstPass = await requestReceipt("fast");
       if (requestId !== scanRequestRef.current) return;
-      setReceipt(firstPass.receipt);
+      setReceipt(catalogifyReceipt(firstPass.receipt));
       setReceiptSource(source);
       setRawText(firstPass.rawText);
 
@@ -428,7 +484,7 @@ export default function CaptureView() {
       setStatus("Still improving this scan...");
       const refinedPass = await requestReceipt("refine");
       if (requestId !== scanRequestRef.current) return;
-      setReceipt(refinedPass.receipt);
+      setReceipt(catalogifyReceipt(refinedPass.receipt));
       setRawText(refinedPass.rawText);
       setRefining(false);
       setScanPhase("complete");
@@ -484,6 +540,24 @@ export default function CaptureView() {
     }, "image/jpeg", 0.92);
   }
 
+  function updateLine(index: number, patch: LineEdit) {
+    setLineEdits((current) => ({
+      ...current,
+      [index]: { ...current[index], ...patch, manual: true },
+    }));
+  }
+
+  function chooseCatalogItem(index: number, catalogId: string) {
+    setLineEdits((current) => ({
+      ...current,
+      [index]: {
+        ...current[index],
+        catalogId: catalogId || null,
+        manual: Boolean(catalogId),
+      },
+    }));
+  }
+
   const reconciliation = receipt ? getReconciliation(receipt) : null;
   const isReconciled = receipt != null && reconciliation != null && receiptIsReconciled(receipt, reconciliation);
   const averageConfidence = receipt?.lines.length
@@ -505,7 +579,7 @@ export default function CaptureView() {
           <small>JPG, PNG, or WebP · max 10 MB</small>
           <span className="browse">Choose a file</span>
         </label>
-        <button className="demo-load-button" type="button" onClick={loadDemoReceipt}><span>Load demo receipt</span><small>ShopRite · includes Tide Pods anomaly</small><span>↗</span></button>
+        <button className="demo-load-button" type="button" onClick={loadDemoReceipt}><span>Load catalog demo</span><small>ShopRite · benchmark item matching</small><span>↗</span></button>
         <div className="status-line"><span className={`status-dot ${busy ? "busy" : ""}`} /><span>{status}</span></div>
         {error && <div className="error-box" role="alert">{error}</div>}
         <p className="privacy-note">Uploaded images are processed for this request only. Demo data is stored in this browser session.</p>
@@ -527,14 +601,45 @@ export default function CaptureView() {
           <div className="result-header"><div><p className="eyebrow">{receiptSource === "demo" ? "Seeded demo extraction" : "Latest extraction"}</p><h2>{receipt.merchant ?? "Unknown merchant"}</h2><p className="result-date">{receipt.date ?? "Date not found"} <span>·</span> {receipt.lines.length} products identified</p></div><div className="result-actions"><span className={`confidence-badge ${isReconciled ? "is-reconciled" : ""}`}>{averageConfidence}% extraction confidence</span><button className="quiet-button report-button" type="button" onClick={() => void copyDevReport()}>{reportCopied ? "Report copied" : "Copy dev report"} <span aria-hidden="true">↗</span></button><button className="secondary-button" type="button" onClick={resetScan} disabled={busy}>Scan another receipt <span aria-hidden="true">↗</span></button></div></div>
           <div className="totals"><div className="total-primary"><span>Total paid</span><strong>{themeMoney(receipt.total ?? receipt.balance)}</strong><small>{receipt.total != null ? "Receipt total" : "Balance captured from receipt"}</small></div><div><span>Subtotal</span><strong>{themeMoney(receipt.subtotal)}</strong><small>After discounts</small></div><div><span>Tax</span><strong>{themeMoney(receipt.tax)}</strong><small>Applied at checkout</small></div></div>
           <div className={`receipt-status ${isReconciled ? "is-reconciled" : "is-review"}`} role="status"><span className="receipt-status-mark" aria-hidden="true">{isReconciled ? "✓" : "!"}</span><div><strong>{isReconciled ? "Receipt totals reconcile" : "Review recommended"}</strong><p>{isReconciled ? `${receipt.lines.length} products, ${couponCount(receipt)} coupons, and tax are accounted for.` : "Some receipt values still need confirmation before this purchase is used."}</p></div>{receipt.warnings.length > 0 && <details className="review-details"><summary>{receipt.warnings.length} review {receipt.warnings.length === 1 ? "note" : "notes"}</summary><ul>{receipt.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul></details>}</div>
-          <div className="line-table"><div className="table-head"><span>Product</span><span>Receipt detail</span><span>Amount</span><span>Match</span></div>{receipt.lines.map((line, index) => <div className="table-row" key={`${line.rawText}-${index}`}><span className="product-cell"><strong>{displayDescription(line)}</strong><small className="raw-line">{line.rawText}</small></span><span className="product-meta"><small>{line.quantity != null ? `${line.quantity} ${line.unit ?? "item"}` : "Quantity not found"}</small><small>{displayCategory(line)}</small></span><span className="amount-cell">{themeMoney(line.amount)}</span><span className={lineNeedsReview(line) ? "review-confidence" : "good-confidence"}>{lineNeedsReview(line) ? "Review" : `${Math.round(line.confidence)}%`}</span></div>)}
+          <div className="line-table"><div className="table-head"><span>Product</span><span>Amount bought</span><span>Receipt amount</span><span>Review</span></div>{receipt.lines.map((line, index) => {
+            const reviewLine = getReviewLine(line, index, lineEdits);
+            const selectedUnitList = reviewLine.item ? `unit-options-${index}` : undefined;
+            const matchLabel = reviewLine.manual ? "Manual" : reviewLine.needsReview ? "Review" : `${Math.round(line.confidence)}%`;
+            const matchClass = reviewLine.manual || !reviewLine.needsReview ? "good-confidence" : "review-confidence";
+            return <div className="table-row" key={`${line.rawText}-${index}`}>
+              <span className="product-cell">
+                <span className="select-shell item-select-shell">
+                  <select className="line-select item-select" aria-label={`Item for ${line.rawText}`} value={reviewLine.item?.id ?? ""} onChange={(event) => chooseCatalogItem(index, event.target.value)}>
+                    <option value="">Unidentified item</option>
+                    {benchmarkGroceryCatalog.map((catalogItem) => <option value={catalogItem.id} key={catalogItem.id}>{catalogItem.name}</option>)}
+                  </select>
+                  <span aria-hidden="true">⌄</span>
+                </span>
+                <small className="raw-line">{line.rawText}</small>
+              </span>
+              <span className="product-meta">
+                <span className="quantity-unit" aria-label="Amount bought">
+                  <input className="line-input quantity-input" inputMode="decimal" aria-label={`Quantity for ${reviewLine.title}`} value={reviewLine.quantity} placeholder="—" onChange={(event) => updateLine(index, { quantity: event.target.value })} />
+                  <input className="line-input unit-input" aria-label={`Unit for ${reviewLine.title}`} list={selectedUnitList} value={reviewLine.unit} placeholder="unitless" onChange={(event) => updateLine(index, { unit: event.target.value })} />
+                </span>
+                {reviewLine.item && <datalist id={`unit-options-${index}`}>{reviewLine.item.units.map((unit) => <option value={unit} key={unit} />)}</datalist>}
+                <span className="select-shell category-select-shell">
+                  <select className="line-select category-select" aria-label={`Category for ${reviewLine.title}`} value={reviewLine.category} onChange={(event) => updateLine(index, { category: event.target.value })}>
+                    {groceryCategories.map((category) => <option value={category} key={category}>{category}</option>)}
+                  </select>
+                  <span aria-hidden="true">⌄</span>
+                </span>
+              </span>
+              <span className="amount-cell">{themeMoney(line.amount)}</span>
+              <span className={matchClass}>{matchLabel}</span>
+            </div>;
+          })}
             <div className="reconciliation-summary" aria-label="Subtotal calculation"><div className="reconciliation-heading"><span>Receipt math</span><strong className={isReconciled ? "reconciliation-ok" : "reconciliation-discount"}>{isReconciled ? "✓ Totals reconcile" : "Review totals"}</strong></div><div className="reconciliation-grid"><div><span>Product total</span><strong>{themeMoney(reconciliation?.productTotal ?? null)}</strong><small>Before coupons</small></div><div><span>Coupons / discounts</span><strong className="reconciliation-discount">{(reconciliation?.discountTotal ?? 0) > 0 ? `−${themeMoney(reconciliation?.discountTotal ?? 0)}` : themeMoney(0)}</strong><small>Applied to product total</small></div>{(reconciliation?.bagFee ?? 0) > 0 && <div><span>Paper bags</span><strong>{themeMoney(reconciliation?.bagFee ?? 0)}</strong><small>Assumed at $0.05 each</small></div>}<div><span>Calculated subtotal</span><strong>{themeMoney(reconciliation?.calculatedSubtotal ?? null)}</strong><small>Product total minus coupons and bags</small></div></div></div>
           </div>
           <details className="raw-details"><summary>Developer details · raw OCR and report tools</summary><div className="developer-actions"><button className="quiet-button" type="button" onClick={() => void copyDevReport()}>{reportCopied ? "Report copied" : "Copy full Markdown report"}<span aria-hidden="true">↗</span></button></div><pre>{rawText || "No transcribed receipt text returned."}</pre></details>
-          <PurchaseAnalysis receiptSource={receiptSource} onReview={() => setReviewOpen(true)} />
+          <PurchaseAnalysis receiptSource={receiptSource} />
         </>}
       </div>
     </section>
-    <PurchaseReviewDialog open={reviewOpen} onClose={() => setReviewOpen(false)} />
   </>;
 }
