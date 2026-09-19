@@ -60,6 +60,7 @@ type ScanPhase = "idle" | "scanning" | "refining" | "complete";
 
 type LineEdit = {
   catalogId?: string | null;
+  name?: string;
   quantity?: string;
   unit?: string;
   category?: string;
@@ -139,7 +140,7 @@ function getReviewLine(line: ReceiptLine, index: number, edits: Record<number, L
   const fallbackCategory = displayCategory(line);
   return {
     item,
-    title: item?.name ?? "Unidentified item",
+    title: edit?.name ?? item?.name ?? "Unidentified item",
     quantity: edit?.quantity ?? (line.quantity != null ? String(line.quantity) : item ? "1" : ""),
     unit: edit?.unit ?? line.unit ?? item?.defaultUnit ?? "",
     category: edit?.category ?? item?.category ?? fallbackCategory,
@@ -214,7 +215,8 @@ function receiptIsReconciled(receipt: Receipt, reconciliation: ReturnType<typeof
 }
 
 function couponCount(receipt: Receipt) {
-  return receipt.adjustments?.filter((adjustment) => ["coupon", "discount"].includes(adjustment.kind)).length ?? 0;
+  return receipt.adjustments?.filter((adjustment) => ["coupon", "discount"].includes(adjustment.kind)
+    || adjustment.kind === "loyalty" && /coupon|reward|discount|saving|saved/i.test(adjustment.rawText)).length ?? 0;
 }
 
 function reportCell(value: unknown) {
@@ -241,14 +243,9 @@ function isCatalogItem(value: unknown): value is GroceryCatalogItem {
     && candidate.aliases.every((alias) => typeof alias === "string");
 }
 
-function customCatalogItems(catalogItems: readonly GroceryCatalogItem[]) {
-  const benchmarkIds = new Set(benchmarkGroceryCatalog.map((catalogItem) => catalogItem.id));
-  return catalogItems.filter((catalogItem) => !benchmarkIds.has(catalogItem.id));
-}
-
-function persistCustomCatalog(catalogItems: readonly GroceryCatalogItem[]) {
+function persistCatalog(catalogItems: readonly GroceryCatalogItem[]) {
   try {
-    window.localStorage.setItem(customCatalogStorageKey, JSON.stringify(customCatalogItems(catalogItems)));
+    window.localStorage.setItem(customCatalogStorageKey, JSON.stringify(catalogItems));
   } catch {
     // The catalog still works for this page when browser storage is unavailable.
   }
@@ -377,7 +374,7 @@ function PurchaseAnalysis({ receiptSource, catalogItems, unidentifiedCount }: { 
     {isCatalogDemo ? <>
       <div className="catalog-callout"><div className="anomaly-mark">✓</div><div><strong>Brand-free item matching is on</strong><p>{unidentifiedCount > 0 ? `${unidentifiedCount} line${unidentifiedCount === 1 ? " remains" : "s remain"} unidentified until you choose or create an item option.` : "Every line has a saved catalog option. New options will be available on future receipts."}</p></div></div>
       <div className="analysis-evidence"><div><span>Catalog items</span><strong>{catalogItems.length}</strong><small>Brand-free options available</small></div><div><span>Editable units</span><strong>Per line</strong><small>Package, oz, lb, cans, and more</small></div><div><span>Manual review</span><strong>{unidentifiedCount} line{unidentifiedCount === 1 ? "" : "s"}</strong><small>{unidentifiedCount > 0 ? "Unidentified until confirmed" : "All lines have a saved option"}</small></div></div>
-      <div className="analysis-footer"><p>Choosing an item, quantity, unit, or category records a manual edit for that line.</p></div>
+      <div className="analysis-footer"><p>Edited item names update the saved catalog. Quantity, unit, and category changes stay specific to this receipt.</p></div>
     </> : <p className="analysis-empty-copy">Historical comparisons will appear here as purchase history accumulates. This receipt is ready to become part of that signal.</p>}
   </section>;
 }
@@ -414,8 +411,13 @@ export default function CaptureView() {
       if (!stored) return;
       const saved = JSON.parse(stored) as unknown;
       if (!Array.isArray(saved)) return;
-      const customItems = saved.filter(isCatalogItem).filter((catalogItem) => !benchmarkGroceryCatalog.some((benchmarkItem) => benchmarkItem.id === catalogItem.id));
-      const loadedCatalogItems = [...benchmarkGroceryCatalog, ...customItems];
+      const savedItems = saved.filter(isCatalogItem);
+      const savedById = new Map(savedItems.map((catalogItem) => [catalogItem.id, catalogItem]));
+      const benchmarkIds = new Set(benchmarkGroceryCatalog.map((catalogItem) => catalogItem.id));
+      const loadedCatalogItems = [
+        ...benchmarkGroceryCatalog.map((catalogItem) => savedById.get(catalogItem.id) ?? catalogItem),
+        ...savedItems.filter((catalogItem) => !benchmarkIds.has(catalogItem.id)),
+      ];
       catalogItemsRef.current = loadedCatalogItems;
       setCatalogItems(loadedCatalogItems);
     } catch {
@@ -499,7 +501,7 @@ export default function CaptureView() {
     const result = catalogifyReceiptAndLearn(nextReceipt, catalogItemsRef.current);
     catalogItemsRef.current = result.catalogItems;
     setCatalogItems(result.catalogItems);
-    persistCustomCatalog(result.catalogItems);
+    persistCatalog(result.catalogItems);
     setReceipt(result.receipt);
   }
 
@@ -623,12 +625,61 @@ export default function CaptureView() {
     }));
   }
 
+  function commitLineName(index: number, rawName: string) {
+    const nextName = rawName.trim().replace(/\s+/g, " ");
+    if (!nextName || nextName === "Unidentified item") return;
+    const line = receipt?.lines[index];
+    if (!line) return;
+
+    const currentCatalogItems = catalogItemsRef.current;
+    const currentReviewLine = getReviewLine(line, index, lineEdits, currentCatalogItems);
+    let savedItem = currentReviewLine.item;
+    let nextCatalogItems = currentCatalogItems;
+
+    if (savedItem) {
+      nextCatalogItems = currentCatalogItems.map((catalogItem) => catalogItem.id === savedItem?.id
+        ? { ...catalogItem, name: nextName, aliases: [...new Set([nextName, ...catalogItem.aliases])] }
+        : catalogItem);
+      savedItem = nextCatalogItems.find((catalogItem) => catalogItem.id === savedItem?.id) ?? savedItem;
+    } else {
+      const suggestedItem = suggestCatalogItemFromLine(line);
+      const baseItem = suggestedItem
+        ? { ...suggestedItem, name: nextName, aliases: [...new Set([nextName, ...suggestedItem.aliases])] }
+        : {
+            id: `custom-${nextName.toLowerCase().replace(/[^a-z0-9]+/g, "-") || "item"}`,
+            name: nextName,
+            category: displayCategory(line),
+            units: ["package", "each", "oz", "lb"],
+            defaultUnit: "package",
+            aliases: [nextName, line.rawText],
+          } satisfies GroceryCatalogItem;
+      let nextId = baseItem.id;
+      let suffix = 2;
+      while (nextCatalogItems.some((catalogItem) => catalogItem.id === nextId)) {
+        nextId = `${baseItem.id}-${suffix}`;
+        suffix += 1;
+      }
+      savedItem = { ...baseItem, id: nextId };
+      nextCatalogItems = [...nextCatalogItems, savedItem];
+    }
+
+    catalogItemsRef.current = nextCatalogItems;
+    setCatalogItems(nextCatalogItems);
+    persistCatalog(nextCatalogItems);
+    setLineEdits((current) => ({
+      ...current,
+      [index]: { ...current[index], catalogId: savedItem?.id ?? null, name: nextName, manual: true },
+    }));
+    setStatus(`Saved ${nextName} for future receipts`);
+  }
+
   function chooseCatalogItem(index: number, catalogId: string) {
     setLineEdits((current) => ({
       ...current,
       [index]: {
         ...current[index],
         catalogId: catalogId || null,
+        name: undefined,
         manual: Boolean(catalogId),
       },
     }));
@@ -685,12 +736,15 @@ export default function CaptureView() {
             const matchClass = reviewLine.manual || !reviewLine.needsReview ? "good-confidence" : "review-confidence";
             return <div className="table-row" key={`${line.rawText}-${index}`}>
               <span className="product-cell">
-                <span className="select-shell item-select-shell">
-                  <select className="line-select item-select" aria-label={`Item for ${line.rawText}`} value={reviewLine.item?.id ?? ""} onChange={(event) => chooseCatalogItem(index, event.target.value)}>
-                    <option value="">Unidentified item</option>
-                    {catalogItems.map((catalogItem) => <option value={catalogItem.id} key={catalogItem.id}>{catalogItem.name}</option>)}
-                  </select>
-                  <span aria-hidden="true">⌄</span>
+                <span className="item-name-control">
+                  <input className="line-input item-name-input" aria-label={`Name for ${line.rawText}`} value={reviewLine.title} onChange={(event) => updateLine(index, { name: event.target.value })} onBlur={(event) => commitLineName(index, event.currentTarget.value)} />
+                  <span className="select-shell item-select-shell">
+                    <select className="line-select item-select" aria-label={`Choose catalog item for ${line.rawText}`} value={reviewLine.item?.id ?? ""} onChange={(event) => chooseCatalogItem(index, event.target.value)}>
+                      <option value="">Unidentified item</option>
+                      {catalogItems.map((catalogItem) => <option value={catalogItem.id} key={catalogItem.id}>{catalogItem.name}</option>)}
+                    </select>
+                    <span aria-hidden="true">⌄</span>
+                  </span>
                 </span>
                 <small className="raw-line">{line.rawText}</small>
               </span>
