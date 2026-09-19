@@ -190,10 +190,60 @@ function catalogifyReceiptAndLearn(receipt: Receipt, catalogItems: readonly Groc
     nextCatalogItems.push({ ...suggestedItem, id: nextId });
   }
 
+  const catalogifiedReceipt = catalogifyReceipt(firstPass, nextCatalogItems);
   return {
-    receipt: catalogifyReceipt(firstPass, nextCatalogItems),
+    receipt: {
+      ...catalogifiedReceipt,
+      lines: stackReceiptLines(catalogifiedReceipt.lines, nextCatalogItems),
+    },
     catalogItems: nextCatalogItems,
   };
+}
+
+function stackLineSignature(line: ReceiptLine) {
+  return `${line.rawText} ${line.description ?? ""}`
+    .toLowerCase()
+    .replace(/^\s*\d{4,}\s+/, " ")
+    .replace(/\b\d+(?:\.\d+)?\b/g, " ")
+    .replace(/\b(?:fb|ne|a|f|t)\b/g, " ")
+    .replace(/[^a-z]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function stackReceiptLines(lines: ReceiptLine[], catalogItems: readonly GroceryCatalogItem[]) {
+  const stacked: ReceiptLine[] = [];
+  const stackIndexes = new Map<string, number>();
+
+  for (const line of lines) {
+    const catalogItem = matchCatalogItem(line.rawText, line.description, catalogItems);
+    const signature = stackLineSignature(line);
+    const key = signature ? `${catalogItem?.id ?? "raw"}:${signature}` : `line:${stacked.length}`;
+    const existingIndex = stackIndexes.get(key);
+    if (existingIndex == null) {
+      stackIndexes.set(key, stacked.length);
+      stacked.push(line);
+      continue;
+    }
+
+    const existing = stacked[existingIndex];
+    const quantity = (existing.quantity ?? 1) + (line.quantity ?? 1);
+    const amount = existing.amount != null && line.amount != null ? Math.round((existing.amount + line.amount) * 100) / 100 : null;
+    const unitPrice = existing.unitPrice != null && line.unitPrice != null && Math.abs(existing.unitPrice - line.unitPrice) <= 0.005
+      ? existing.unitPrice
+      : null;
+    stacked[existingIndex] = {
+      ...existing,
+      rawText: `${existing.rawText} · ${line.rawText}`,
+      quantity,
+      unitPrice,
+      amount,
+      confidence: Math.min(existing.confidence, line.confidence),
+      needsReview: existing.needsReview || line.needsReview,
+    };
+  }
+
+  return stacked;
 }
 
 function shouldRefineReceipt(receipt: Receipt) {

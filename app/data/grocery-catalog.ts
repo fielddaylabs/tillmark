@@ -70,7 +70,8 @@ export const benchmarkGroceryCatalog: GroceryCatalogItem[] = [
   item("cereal", "Cereal", "Pantry", ["box", "package", "oz"], ["cereal", "cheerios"]),
   item("coffee", "Coffee", "Beverage", ["bag", "can", "oz"], ["coffee", "coffee c", "srbb orig coffee c"]),
   item("tea", "Tea", "Beverage", ["box", "package", "oz"], ["tea", "tetley tea british"]),
-  item("juice", "Juice", "Beverage", ["bottle", "carton", "oz"], ["juice", "cold pressed juice", "fruit cups - juice", "cranberry cocktail"]),
+  item("fruit-cups-in-juice", "Fruit Cups in Juice", "Pantry", ["package", "each", "oz"], ["fruit cups - juice", "fruit cups in juice"], "package"),
+  item("juice", "Juice", "Beverage", ["bottle", "carton", "oz"], ["juice", "cold pressed juice", "cranberry cocktail"]),
   item("water", "Water", "Beverage", ["bottle", "pack", "oz"], ["water", "pure life 24pk watpc", "aquafi 2pk"]),
   item("pizza", "Pizza", "Frozen food", ["each", "package"], ["pizza", "all nat pizzas"]),
   item("hummus", "Hummus", "Pantry", ["container", "package", "oz"], ["hummus", "organic hummus", "jsp h org hummus", "cdr hommus tahin"]),
@@ -137,11 +138,15 @@ export function catalogifyReceiptLines<T extends { rawText: string; description:
   return lines.map((line) => {
     const catalogItem = matchCatalogItem(line.rawText, line.description, catalogItems);
     if (!catalogItem) return line;
+    const normalizedUnit = line.unit?.trim().toLowerCase();
+    const unit = normalizedUnit && catalogItem.units.some((catalogUnit) => catalogUnit.toLowerCase() === normalizedUnit)
+      ? line.unit
+      : catalogItem.defaultUnit || null;
     return {
       ...line,
       description: catalogItem.name,
       category: catalogItem.category,
-      unit: line.unit ?? (catalogItem.defaultUnit || null),
+      unit,
     };
   });
 }
