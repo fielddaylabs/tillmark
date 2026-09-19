@@ -171,6 +171,30 @@ function catalogifyReceipt(receipt: Receipt, catalogItems: readonly GroceryCatal
   };
 }
 
+function catalogifyReceiptAndLearn(receipt: Receipt, catalogItems: readonly GroceryCatalogItem[]) {
+  const firstPass = catalogifyReceipt(receipt, catalogItems);
+  const nextCatalogItems = [...catalogItems];
+
+  for (const line of firstPass.lines) {
+    if (matchCatalogItem(line.rawText, line.description, nextCatalogItems)) continue;
+    const suggestedItem = suggestCatalogItemFromLine(line);
+    if (!suggestedItem || nextCatalogItems.some((catalogItem) => catalogItem.name.toLowerCase() === suggestedItem.name.toLowerCase())) continue;
+
+    let nextId = suggestedItem.id;
+    let suffix = 2;
+    while (nextCatalogItems.some((catalogItem) => catalogItem.id === nextId)) {
+      nextId = `${suggestedItem.id}-${suffix}`;
+      suffix += 1;
+    }
+    nextCatalogItems.push({ ...suggestedItem, id: nextId });
+  }
+
+  return {
+    receipt: catalogifyReceipt(firstPass, nextCatalogItems),
+    catalogItems: nextCatalogItems,
+  };
+}
+
 function shouldRefineReceipt(receipt: Receipt) {
   const averageConfidence = receipt.lines.length
     ? receipt.lines.reduce((sum, line) => sum + line.confidence, 0) / receipt.lines.length
@@ -377,6 +401,7 @@ export default function CaptureView() {
   const streamRef = useRef<MediaStream | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const scanRequestRef = useRef(0);
+  const catalogItemsRef = useRef<GroceryCatalogItem[]>(benchmarkGroceryCatalog);
 
   useEffect(() => {
     if (!preview) return;
@@ -390,7 +415,9 @@ export default function CaptureView() {
       const saved = JSON.parse(stored) as unknown;
       if (!Array.isArray(saved)) return;
       const customItems = saved.filter(isCatalogItem).filter((catalogItem) => !benchmarkGroceryCatalog.some((benchmarkItem) => benchmarkItem.id === catalogItem.id));
-      setCatalogItems([...benchmarkGroceryCatalog, ...customItems]);
+      const loadedCatalogItems = [...benchmarkGroceryCatalog, ...customItems];
+      catalogItemsRef.current = loadedCatalogItems;
+      setCatalogItems(loadedCatalogItems);
     } catch {
       // The benchmark catalog remains available when saved catalog data is invalid.
     }
@@ -439,7 +466,7 @@ export default function CaptureView() {
     setBusy(false);
     setFile(null);
     setPreview(null);
-    setReceipt(catalogifyReceipt(demoReceipt, catalogItems));
+    applyReceiptCatalog(demoReceipt);
     setLineEdits({});
     setRefining(false);
     setScanPhase("complete");
@@ -466,6 +493,14 @@ export default function CaptureView() {
     setReceiptSource("upload");
     setStatus("Ready for a receipt photo");
     if (fileInputRef.current) fileInputRef.current.value = "";
+  }
+
+  function applyReceiptCatalog(nextReceipt: Receipt) {
+    const result = catalogifyReceiptAndLearn(nextReceipt, catalogItemsRef.current);
+    catalogItemsRef.current = result.catalogItems;
+    setCatalogItems(result.catalogItems);
+    persistCustomCatalog(result.catalogItems);
+    setReceipt(result.receipt);
   }
 
   function onFileChange(event: ChangeEvent<HTMLInputElement>) {
@@ -510,7 +545,7 @@ export default function CaptureView() {
       setStatus("Reading enhanced image...");
       const firstPass = await requestReceipt("fast");
       if (requestId !== scanRequestRef.current) return;
-      setReceipt(catalogifyReceipt(firstPass.receipt, catalogItems));
+      applyReceiptCatalog(firstPass.receipt);
       setReceiptSource(source);
       setRawText(firstPass.rawText);
 
@@ -525,7 +560,7 @@ export default function CaptureView() {
       setStatus("Still improving this scan...");
       const refinedPass = await requestReceipt("refine");
       if (requestId !== scanRequestRef.current) return;
-      setReceipt(catalogifyReceipt(refinedPass.receipt, catalogItems));
+      applyReceiptCatalog(refinedPass.receipt);
       setRawText(refinedPass.rawText);
       setRefining(false);
       setScanPhase("complete");
@@ -588,37 +623,7 @@ export default function CaptureView() {
     }));
   }
 
-  function createCatalogItem(index: number) {
-    const line = receipt?.lines[index];
-    if (!line) return;
-    const suggestedItem = suggestCatalogItemFromLine(line);
-    if (!suggestedItem) {
-      setError("The receipt line does not contain enough text to create a catalog option.");
-      return;
-    }
-
-    let nextId = suggestedItem.id;
-    let suffix = 2;
-    while (catalogItems.some((catalogItem) => catalogItem.id === nextId)) {
-      nextId = `${suggestedItem.id}-${suffix}`;
-      suffix += 1;
-    }
-    const createdItem = { ...suggestedItem, id: nextId };
-    const nextCatalogItems = [...catalogItems, createdItem];
-    setCatalogItems(nextCatalogItems);
-    persistCustomCatalog(nextCatalogItems);
-    setLineEdits((current) => ({
-      ...current,
-      [index]: { ...current[index], catalogId: createdItem.id, manual: true },
-    }));
-    setStatus(`Saved ${createdItem.name} as a new item option`);
-  }
-
   function chooseCatalogItem(index: number, catalogId: string) {
-    if (catalogId === "__create_new_item__") {
-      createCatalogItem(index);
-      return;
-    }
     setLineEdits((current) => ({
       ...current,
       [index]: {
@@ -676,7 +681,6 @@ export default function CaptureView() {
           <div className="line-table"><div className="table-head"><span>Product</span><span>Amount bought</span><span>Receipt amount</span><span>Review</span></div>{receipt.lines.map((line, index) => {
             const reviewLine = getReviewLine(line, index, lineEdits, catalogItems);
             const selectedUnitList = reviewLine.item ? `unit-options-${index}` : undefined;
-            const suggestedCatalogItem = !reviewLine.item ? suggestCatalogItemFromLine(line) : null;
             const matchLabel = reviewLine.manual ? "Manual" : reviewLine.needsReview ? "Review" : `${Math.round(line.confidence)}%`;
             const matchClass = reviewLine.manual || !reviewLine.needsReview ? "good-confidence" : "review-confidence";
             return <div className="table-row" key={`${line.rawText}-${index}`}>
@@ -684,7 +688,6 @@ export default function CaptureView() {
                 <span className="select-shell item-select-shell">
                   <select className="line-select item-select" aria-label={`Item for ${line.rawText}`} value={reviewLine.item?.id ?? ""} onChange={(event) => chooseCatalogItem(index, event.target.value)}>
                     <option value="">Unidentified item</option>
-                    {!reviewLine.item && <option value="__create_new_item__">Create “{suggestedCatalogItem?.name ?? "new item"}” option…</option>}
                     {catalogItems.map((catalogItem) => <option value={catalogItem.id} key={catalogItem.id}>{catalogItem.name}</option>)}
                   </select>
                   <span aria-hidden="true">⌄</span>

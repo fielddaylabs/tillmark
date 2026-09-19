@@ -150,24 +150,47 @@ export function findCatalogItem(id: string | null | undefined, catalogItems: rea
   return id ? catalogItems.find((catalogItem) => catalogItem.id === id) ?? null : null;
 }
 
-const ignoredSuggestionTokens = new Set(["a", "c", "f", "n", "o", "t", "x", "id", "pc", "ct", "pk", "pack", "cn", "case"]);
+const ignoredSuggestionTokens = new Set(["a", "c", "f", "n", "o", "t", "w", "x", "id", "pc", "ct", "pk", "pack", "cn", "case", "cd", "dme", "flgrs", "fs", "hrd", "jnkls", "polaner", "rus", "wndrbr"]);
 const brandSuggestionTokens = new Set([
   "aldi", "amys", "bertolli", "breyers", "chobani", "coke", "clancys", "feel", "foods", "goya", "gilliam", "good",
   "helman", "naked", "one", "oreo", "russo", "shoprite", "sonoma", "srbb", "srpb", "tenderin", "udis", "wpo",
 ]);
 const suggestionReplacements: Record<string, string> = {
+  amercn: "american",
+  bns: "beans",
+  bologn: "bologna",
+  br: "bar",
+  che: "cheese",
+  chdr: "cheddar",
+  chv: "cheddar",
   citz: "cider",
   cit: "cider",
   cid: "cider",
+  cinn: "cinnamon",
+  crm: "cream",
+  crkr: "crackers",
+  dico: "diced",
+  dlx: "deluxe",
   drsng: "dressing",
+  electroly: "electrolyte",
+  grnla: "granola",
+  haban: "habanero",
   hrt: "heart",
   hts: "hearts",
   mayo: "mayonnaise",
+  micro: "microwave",
   mozz: "mozzarella",
   mushrms: "mushrooms",
   pepp: "pepper",
+  pnt: "peanut",
+  pop: "popcorn",
   tom: "tomato",
+  tomto: "tomato",
   veg: "vegetable",
+  shls: "shells",
+  sngl: "singles",
+  wht: "white",
+  wtr: "water",
 };
 
 function titleCase(value: string) {
