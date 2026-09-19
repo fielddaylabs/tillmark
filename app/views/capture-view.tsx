@@ -485,12 +485,31 @@ export default function CaptureView() {
       const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" } }, audio: false });
       streamRef.current?.getTracks().forEach((track) => track.stop());
       streamRef.current = stream;
-      if (videoRef.current) videoRef.current.srcObject = stream;
       setCameraState("ready");
     } catch {
       setCameraState("denied");
     }
   }
+
+  function attachCameraStream() {
+    const video = videoRef.current;
+    const stream = streamRef.current;
+    if (!video || !stream) return;
+    if (video.srcObject !== stream) video.srcObject = stream;
+    void video.play().catch(() => {
+      // The muted, inline video should autoplay on supported mobile browsers.
+    });
+  }
+
+  useEffect(() => {
+    if (cameraState !== "ready") return;
+    attachCameraStream();
+    const video = videoRef.current;
+    if (!video) return;
+    const handleLoadedMetadata = () => attachCameraStream();
+    video.addEventListener("loadedmetadata", handleLoadedMetadata);
+    return () => video.removeEventListener("loadedmetadata", handleLoadedMetadata);
+  }, [cameraState]);
 
   useEffect(() => {
     void startCamera();
