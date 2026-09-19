@@ -1,7 +1,7 @@
 "use client";
 
 import { ChangeEvent, DragEvent, useEffect, useRef, useState } from "react";
-import { benchmarkGroceryCatalog, catalogifyReceiptLines, findCatalogItem, groceryCategories, matchCatalogItem, suggestCatalogItemFromLine, GroceryCatalogItem } from "../data/grocery-catalog";
+import { benchmarkGroceryCatalog, catalogifyReceiptLines, findCatalogItem, groceryCategories, legacyCatalogIdRedirects, matchCatalogItem, suggestCatalogItemFromLine, GroceryCatalogItem } from "../data/grocery-catalog";
 import { PageHeading } from "./page-heading";
 
 type ReceiptLine = {
@@ -77,6 +77,22 @@ type ReviewLine = {
   needsReview: boolean;
 };
 
+type ManualLineDraft = {
+  name: string;
+  quantity: string;
+  unit: string;
+  amount: string;
+  category: string;
+};
+
+const emptyManualLineDraft: ManualLineDraft = {
+  name: "",
+  quantity: "1",
+  unit: "each",
+  amount: "",
+  category: "Grocery",
+};
+
 const demoReceipt: Receipt = {
   merchant: "ShopRite",
   date: "Sep 18, 2026",
@@ -108,6 +124,25 @@ function getReconciliation(receipt: Receipt) {
   const calculatedSubtotal = receipt.reconciliation?.calculatedSubtotal ?? (productTotal == null ? null : Math.round((productTotal - discountTotal) * 100) / 100);
   const bagFee = receipt.reconciliation?.bagFee ?? 0;
   return { productTotal, discountTotal, calculatedSubtotal, bagFee };
+}
+
+function recalculateReceiptLines(receipt: Receipt, lines: ReceiptLine[]): Receipt {
+  const productTotal = sumLineAmounts(lines);
+  const discountTotal = receipt.reconciliation?.discountTotal ?? 0;
+  const bagFee = receipt.reconciliation?.bagFee ?? 0;
+  const calculatedSubtotal = productTotal == null ? null : Math.round((productTotal - discountTotal + bagFee) * 100) / 100;
+  return {
+    ...receipt,
+    lines,
+    subtotal: calculatedSubtotal ?? receipt.subtotal,
+    reconciliation: {
+      ...receipt.reconciliation,
+      productTotal,
+      discountTotal: receipt.reconciliation?.discountTotal ?? null,
+      calculatedSubtotal,
+      bagFee: receipt.reconciliation?.bagFee ?? null,
+    },
+  };
 }
 
 function displayDescription(line: ReceiptLine) {
@@ -452,6 +487,7 @@ export default function CaptureView() {
   const [receipt, setReceipt] = useState<Receipt | null>(null);
   const [catalogItems, setCatalogItems] = useState<GroceryCatalogItem[]>(benchmarkGroceryCatalog);
   const [lineEdits, setLineEdits] = useState<Record<number, LineEdit>>({});
+  const [manualLineDraft, setManualLineDraft] = useState<ManualLineDraft>(emptyManualLineDraft);
   const [receiptSource, setReceiptSource] = useState<ReceiptSource>("upload");
   const [rawText, setRawText] = useState("");
   const [status, setStatus] = useState("Ready for a receipt photo");
@@ -504,14 +540,18 @@ export default function CaptureView() {
       const saved = JSON.parse(stored) as unknown;
       if (!Array.isArray(saved)) return;
       const savedItems = saved.filter(isCatalogItem);
-      const savedById = new Map(savedItems.map((catalogItem) => [catalogItem.id, catalogItem]));
       const benchmarkIds = new Set(benchmarkGroceryCatalog.map((catalogItem) => catalogItem.id));
+      const legacyIds = new Set(Object.keys(legacyCatalogIdRedirects));
+      const savedById = new Map(savedItems.map((catalogItem) => [catalogItem.id, catalogItem]));
       const loadedCatalogItems = [
-        ...benchmarkGroceryCatalog.map((catalogItem) => savedById.get(catalogItem.id) ?? catalogItem),
-        ...savedItems.filter((catalogItem) => !benchmarkIds.has(catalogItem.id)),
+        ...benchmarkGroceryCatalog,
+        ...savedItems.filter((catalogItem) => !benchmarkIds.has(catalogItem.id) && !legacyIds.has(catalogItem.id)),
       ];
       catalogItemsRef.current = loadedCatalogItems;
       setCatalogItems(loadedCatalogItems);
+      if (savedById.size !== loadedCatalogItems.length || savedItems.some((catalogItem) => legacyIds.has(catalogItem.id))) {
+        persistCatalog(loadedCatalogItems);
+      }
     } catch {
       // The benchmark catalog remains available when saved catalog data is invalid.
     }
@@ -565,6 +605,7 @@ export default function CaptureView() {
     setError(null);
     setReceipt(null);
     setLineEdits({});
+    setManualLineDraft(emptyManualLineDraft);
     setRefining(false);
     setScanPhase("scanning");
     setReceiptSource(source);
@@ -582,6 +623,7 @@ export default function CaptureView() {
     setPreview(null);
     applyReceiptCatalog(demoReceipt);
     setLineEdits({});
+    setManualLineDraft(emptyManualLineDraft);
     setRefining(false);
     setScanPhase("complete");
     setReceiptSource("demo");
@@ -598,6 +640,7 @@ export default function CaptureView() {
     setPreview(null);
     setReceipt(null);
     setLineEdits({});
+    setManualLineDraft(emptyManualLineDraft);
     setBusy(false);
     setRefining(false);
     setScanPhase("idle");
@@ -738,6 +781,61 @@ export default function CaptureView() {
     }));
   }
 
+  function removeLine(index: number) {
+    if (!receipt) return;
+    const removedLine = receipt.lines[index];
+    const nextLines = receipt.lines.filter((_, lineIndex) => lineIndex !== index);
+    const nextEdits = Object.entries(lineEdits).reduce<Record<number, LineEdit>>((result, [key, edit]) => {
+      const lineIndex = Number(key);
+      if (!Number.isFinite(lineIndex) || lineIndex === index) return result;
+      result[lineIndex > index ? lineIndex - 1 : lineIndex] = edit;
+      return result;
+    }, {});
+    setLineEdits(nextEdits);
+    setReceipt(recalculateReceiptLines(receipt, nextLines));
+    setStatus(`Removed ${displayDescription(removedLine)}`);
+  }
+
+  function addManualLine() {
+    if (!receipt) return;
+    const name = manualLineDraft.name.trim().replace(/\s+/g, " ");
+    const quantity = Number(manualLineDraft.quantity);
+    const amount = Number(manualLineDraft.amount);
+    const unit = manualLineDraft.unit.trim() || "each";
+    if (!name || !Number.isFinite(quantity) || quantity <= 0 || !Number.isFinite(amount) || amount < 0) {
+      setError("Add a name, a positive quantity, and a valid receipt amount before saving the line.");
+      return;
+    }
+
+    const nextIndex = receipt.lines.length;
+    const nextLine: ReceiptLine = {
+      rawText: `Manual entry: ${name}`,
+      description: name,
+      quantity,
+      unit,
+      unitPrice: Math.round((amount / quantity) * 100) / 100,
+      amount: Math.round(amount * 100) / 100,
+      category: manualLineDraft.category || "Grocery",
+      confidence: 100,
+      needsReview: false,
+    };
+    setReceipt(recalculateReceiptLines(receipt, [...receipt.lines, nextLine]));
+    setLineEdits((current) => ({
+      ...current,
+      [nextIndex]: {
+        catalogId: null,
+        name,
+        quantity: String(quantity),
+        unit,
+        category: manualLineDraft.category || "Grocery",
+        manual: true,
+      },
+    }));
+    setManualLineDraft(emptyManualLineDraft);
+    setError(null);
+    setStatus(`Added ${name}`);
+  }
+
   function commitLineName(index: number, rawName: string) {
     const nextName = rawName.trim().replace(/\s+/g, " ");
     if (!nextName || nextName === "Unidentified item") return;
@@ -800,7 +898,10 @@ export default function CaptureView() {
 
   const reconciliation = receipt ? getReconciliation(receipt) : null;
   const isReconciled = receipt != null && reconciliation != null && receiptIsReconciled(receipt, reconciliation);
-  const unidentifiedCount = receipt?.lines.reduce((count, line, index) => count + (getReviewLine(line, index, lineEdits, catalogItems).item ? 0 : 1), 0) ?? 0;
+  const unidentifiedCount = receipt?.lines.reduce((count, line, index) => {
+    const reviewLine = getReviewLine(line, index, lineEdits, catalogItems);
+    return count + (!reviewLine.item && !reviewLine.manual ? 1 : 0);
+  }, 0) ?? 0;
   const averageConfidence = receipt?.lines.length
     ? Math.round(receipt.lines.reduce((sum, line) => sum + line.confidence, 0) / receipt.lines.length)
     : 0;
@@ -875,9 +976,20 @@ export default function CaptureView() {
                 </span>
               </span>
               <span className="amount-cell">{themeMoney(line.amount)}</span>
-              <span className={matchClass}>{matchLabel}</span>
+              <span className="line-review-cell"><span className={matchClass}>{matchLabel}</span><button className="remove-line-button" type="button" aria-label={`Remove ${reviewLine.title}`} onClick={() => removeLine(index)}>Remove</button></span>
             </div>;
           })}
+            <div className="manual-line-panel">
+              <div className="manual-line-heading"><strong>Add a missed line</strong><small>Enter the receipt amount. The receipt math updates immediately.</small></div>
+              <div className="manual-line-form">
+                <label>Item<input value={manualLineDraft.name} placeholder="Product name" onChange={(event) => setManualLineDraft((current) => ({ ...current, name: event.target.value }))} /></label>
+                <label>Quantity<input inputMode="decimal" value={manualLineDraft.quantity} onChange={(event) => setManualLineDraft((current) => ({ ...current, quantity: event.target.value }))} /></label>
+                <label>Unit<input value={manualLineDraft.unit} placeholder="each" onChange={(event) => setManualLineDraft((current) => ({ ...current, unit: event.target.value }))} /></label>
+                <label>Receipt amount<input inputMode="decimal" placeholder="$0.00" value={manualLineDraft.amount} onChange={(event) => setManualLineDraft((current) => ({ ...current, amount: event.target.value }))} /></label>
+                <label>Category<select value={manualLineDraft.category} onChange={(event) => setManualLineDraft((current) => ({ ...current, category: event.target.value }))}>{groceryCategories.map((category) => <option value={category} key={category}>{category}</option>)}</select></label>
+                <button className="manual-add-button" type="button" onClick={addManualLine}>Add line</button>
+              </div>
+            </div>
             <div className="reconciliation-summary" aria-label="Subtotal calculation"><div className="reconciliation-heading"><span>Receipt math</span><strong className={isReconciled ? "reconciliation-ok" : "reconciliation-discount"}>{isReconciled ? "✓ Totals reconcile" : "Review totals"}</strong></div><div className="reconciliation-grid"><div><span>Product total</span><strong>{themeMoney(reconciliation?.productTotal ?? null)}</strong><small>Before coupons</small></div><div><span>Coupons / discounts</span><strong className="reconciliation-discount">{(reconciliation?.discountTotal ?? 0) > 0 ? `−${themeMoney(reconciliation?.discountTotal ?? 0)}` : themeMoney(0)}</strong><small>Applied to product total</small></div>{(reconciliation?.bagFee ?? 0) > 0 && <div><span>Paper bags</span><strong>{themeMoney(reconciliation?.bagFee ?? 0)}</strong><small>Assumed at $0.05 each</small></div>}<div><span>Calculated subtotal</span><strong>{themeMoney(reconciliation?.calculatedSubtotal ?? null)}</strong><small>Product total minus coupons and bags</small></div></div></div>
           </div>
           <details className="raw-details"><summary>Developer details · raw OCR and report tools</summary><div className="developer-actions"><button className="quiet-button" type="button" onClick={() => void copyDevReport()}>{reportCopied ? "Report copied" : "Copy full Markdown report"}<span aria-hidden="true">↗</span></button></div><pre>{rawText || "No transcribed receipt text returned."}</pre></details>
