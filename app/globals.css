@@ -491,3 +491,15 @@ footer { display: flex; justify-content: space-between; gap: 20px; border-top: 1
 @media (max-width: 560px) {
   .table-head span:nth-child(2), .table-row > span:nth-child(2) { display: block; }
 }
+
+@media (max-width: 760px) {
+  .workspace.is-camera-scan { display: block; }
+  .workspace.is-camera-scan .left-column { display: none; }
+  .workspace.is-camera-scan .results-panel { min-height: calc(100svh - 28px); padding: 14px 16px; }
+  .workspace.is-camera-scan .scan-loading-stage { min-height: calc(100svh - 110px); padding: 0; align-content: center; justify-items: center; gap: 22px; }
+  .workspace.is-camera-scan .scan-visual { width: min(100%, 470px); min-height: min(52svh, 420px); }
+  .workspace.is-camera-scan .scan-visual img { max-height: min(48svh, 390px); }
+  .workspace.is-camera-scan .scan-loading-copy { width: min(100%, 330px); text-align: center; }
+  .workspace.is-camera-scan .scan-loading-copy p { margin-right: auto; margin-left: auto; }
+  .workspace.is-camera-scan .scan-progress { margin-right: auto; margin-left: auto; }
+}
