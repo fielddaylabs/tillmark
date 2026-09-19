@@ -1,7 +1,7 @@
 "use client";
 
 import { ChangeEvent, DragEvent, useEffect, useRef, useState } from "react";
-import { benchmarkGroceryCatalog, catalogifyReceiptLines, findCatalogItem, groceryCategories, matchCatalogItem, GroceryCatalogItem } from "../data/grocery-catalog";
+import { benchmarkGroceryCatalog, catalogifyReceiptLines, findCatalogItem, groceryCategories, matchCatalogItem, suggestCatalogItemFromLine, GroceryCatalogItem } from "../data/grocery-catalog";
 import { PageHeading } from "./page-heading";
 
 type ReceiptLine = {
@@ -132,10 +132,10 @@ function lineNeedsReview(line: ReceiptLine) {
   return line.confidence < 90 || line.amount == null || !line.description;
 }
 
-function getReviewLine(line: ReceiptLine, index: number, edits: Record<number, LineEdit>): ReviewLine {
+function getReviewLine(line: ReceiptLine, index: number, edits: Record<number, LineEdit>, catalogItems: readonly GroceryCatalogItem[]): ReviewLine {
   const edit = edits[index];
   const hasCatalogOverride = edit && Object.prototype.hasOwnProperty.call(edit, "catalogId");
-  const item = hasCatalogOverride ? findCatalogItem(edit.catalogId) : matchCatalogItem(line.rawText, line.description);
+  const item = hasCatalogOverride ? findCatalogItem(edit.catalogId, catalogItems) : matchCatalogItem(line.rawText, line.description, catalogItems);
   const fallbackCategory = displayCategory(line);
   return {
     item,
@@ -148,9 +148,9 @@ function getReviewLine(line: ReceiptLine, index: number, edits: Record<number, L
   };
 }
 
-function catalogifyReceipt(receipt: Receipt): Receipt {
+function catalogifyReceipt(receipt: Receipt, catalogItems: readonly GroceryCatalogItem[]): Receipt {
   const adjustments = receipt.adjustments ?? [];
-  const hasDepositLine = receipt.lines.some((line) => matchCatalogItem(line.rawText, line.description)?.id === "bottle-deposit");
+  const hasDepositLine = receipt.lines.some((line) => matchCatalogItem(line.rawText, line.description, catalogItems)?.id === "bottle-deposit");
   const depositAdjustments = hasDepositLine ? [] : adjustments.filter((adjustment) => /bottle\s*deposit|btl\/can\s*deposit/i.test(adjustment.rawText));
   const promotedDepositLines: ReceiptLine[] = depositAdjustments.map((adjustment) => ({
     rawText: adjustment.rawText,
@@ -166,7 +166,7 @@ function catalogifyReceipt(receipt: Receipt): Receipt {
 
   return {
     ...receipt,
-    lines: catalogifyReceiptLines([...receipt.lines, ...promotedDepositLines]),
+    lines: catalogifyReceiptLines([...receipt.lines, ...promotedDepositLines], catalogItems),
     adjustments: depositAdjustments.length ? adjustments.filter((adjustment) => !depositAdjustments.includes(adjustment)) : receipt.adjustments,
   };
 }
@@ -202,6 +202,33 @@ function reportMoney(value: number | null) {
 }
 
 const maxUploadBytes = 3.5 * 1024 * 1024;
+const customCatalogStorageKey = "tillmark-custom-grocery-catalog";
+
+function isCatalogItem(value: unknown): value is GroceryCatalogItem {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value as Partial<GroceryCatalogItem>;
+  return typeof candidate.id === "string"
+    && typeof candidate.name === "string"
+    && typeof candidate.category === "string"
+    && typeof candidate.defaultUnit === "string"
+    && Array.isArray(candidate.units)
+    && candidate.units.every((unit) => typeof unit === "string")
+    && Array.isArray(candidate.aliases)
+    && candidate.aliases.every((alias) => typeof alias === "string");
+}
+
+function customCatalogItems(catalogItems: readonly GroceryCatalogItem[]) {
+  const benchmarkIds = new Set(benchmarkGroceryCatalog.map((catalogItem) => catalogItem.id));
+  return catalogItems.filter((catalogItem) => !benchmarkIds.has(catalogItem.id));
+}
+
+function persistCustomCatalog(catalogItems: readonly GroceryCatalogItem[]) {
+  try {
+    window.localStorage.setItem(customCatalogStorageKey, JSON.stringify(customCatalogItems(catalogItems)));
+  } catch {
+    // The catalog still works for this page when browser storage is unavailable.
+  }
+}
 
 function canvasToJpeg(canvas: HTMLCanvasElement, quality: number) {
   return new Promise<Blob>((resolve, reject) => {
@@ -318,14 +345,14 @@ function buildDevReport(receipt: Receipt, rawText: string, receiptSource: Receip
   ].join("\n");
 }
 
-function PurchaseAnalysis({ receiptSource }: { receiptSource: ReceiptSource }) {
+function PurchaseAnalysis({ receiptSource, catalogItems, unidentifiedCount }: { receiptSource: ReceiptSource; catalogItems: readonly GroceryCatalogItem[]; unidentifiedCount: number }) {
   const isCatalogDemo = receiptSource === "demo";
 
   return <section className="analysis-section is-clear">
     <div className="section-heading-row"><div><p className="eyebrow">Purchasing analysis</p><h3>{isCatalogDemo ? "Benchmark catalog is active" : "Ready for purchasing signals"}</h3></div><span className={`status-chip ${isCatalogDemo ? "success" : "neutral"}`}>{isCatalogDemo ? "Catalog ready" : "History building"}</span></div>
     {isCatalogDemo ? <>
-      <div className="catalog-callout"><div className="anomaly-mark">✓</div><div><strong>Brand-free item matching is on</strong><p>Five lines matched the benchmark catalog. The cider line stays unidentified until you choose the right item.</p></div></div>
-      <div className="analysis-evidence"><div><span>Catalog items</span><strong>{benchmarkGroceryCatalog.length}</strong><small>Brand-free options available</small></div><div><span>Editable units</span><strong>Per line</strong><small>Package, oz, lb, cans, and more</small></div><div><span>Manual review</span><strong>1 line</strong><small>Unidentified until confirmed</small></div></div>
+      <div className="catalog-callout"><div className="anomaly-mark">✓</div><div><strong>Brand-free item matching is on</strong><p>{unidentifiedCount > 0 ? `${unidentifiedCount} line${unidentifiedCount === 1 ? " remains" : "s remain"} unidentified until you choose or create an item option.` : "Every line has a saved catalog option. New options will be available on future receipts."}</p></div></div>
+      <div className="analysis-evidence"><div><span>Catalog items</span><strong>{catalogItems.length}</strong><small>Brand-free options available</small></div><div><span>Editable units</span><strong>Per line</strong><small>Package, oz, lb, cans, and more</small></div><div><span>Manual review</span><strong>{unidentifiedCount} line{unidentifiedCount === 1 ? "" : "s"}</strong><small>{unidentifiedCount > 0 ? "Unidentified until confirmed" : "All lines have a saved option"}</small></div></div>
       <div className="analysis-footer"><p>Choosing an item, quantity, unit, or category records a manual edit for that line.</p></div>
     </> : <p className="analysis-empty-copy">Historical comparisons will appear here as purchase history accumulates. This receipt is ready to become part of that signal.</p>}
   </section>;
@@ -335,6 +362,7 @@ export default function CaptureView() {
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const [receipt, setReceipt] = useState<Receipt | null>(null);
+  const [catalogItems, setCatalogItems] = useState<GroceryCatalogItem[]>(benchmarkGroceryCatalog);
   const [lineEdits, setLineEdits] = useState<Record<number, LineEdit>>({});
   const [receiptSource, setReceiptSource] = useState<ReceiptSource>("upload");
   const [rawText, setRawText] = useState("");
@@ -354,6 +382,19 @@ export default function CaptureView() {
     if (!preview) return;
     return () => URL.revokeObjectURL(preview);
   }, [preview]);
+
+  useEffect(() => {
+    try {
+      const stored = window.localStorage.getItem(customCatalogStorageKey);
+      if (!stored) return;
+      const saved = JSON.parse(stored) as unknown;
+      if (!Array.isArray(saved)) return;
+      const customItems = saved.filter(isCatalogItem).filter((catalogItem) => !benchmarkGroceryCatalog.some((benchmarkItem) => benchmarkItem.id === catalogItem.id));
+      setCatalogItems([...benchmarkGroceryCatalog, ...customItems]);
+    } catch {
+      // The benchmark catalog remains available when saved catalog data is invalid.
+    }
+  }, []);
 
   async function startCamera() {
     if (!navigator.mediaDevices?.getUserMedia) {
@@ -398,7 +439,7 @@ export default function CaptureView() {
     setBusy(false);
     setFile(null);
     setPreview(null);
-    setReceipt(catalogifyReceipt(demoReceipt));
+    setReceipt(catalogifyReceipt(demoReceipt, catalogItems));
     setLineEdits({});
     setRefining(false);
     setScanPhase("complete");
@@ -469,7 +510,7 @@ export default function CaptureView() {
       setStatus("Reading enhanced image...");
       const firstPass = await requestReceipt("fast");
       if (requestId !== scanRequestRef.current) return;
-      setReceipt(catalogifyReceipt(firstPass.receipt));
+      setReceipt(catalogifyReceipt(firstPass.receipt, catalogItems));
       setReceiptSource(source);
       setRawText(firstPass.rawText);
 
@@ -484,7 +525,7 @@ export default function CaptureView() {
       setStatus("Still improving this scan...");
       const refinedPass = await requestReceipt("refine");
       if (requestId !== scanRequestRef.current) return;
-      setReceipt(catalogifyReceipt(refinedPass.receipt));
+      setReceipt(catalogifyReceipt(refinedPass.receipt, catalogItems));
       setRawText(refinedPass.rawText);
       setRefining(false);
       setScanPhase("complete");
@@ -547,7 +588,37 @@ export default function CaptureView() {
     }));
   }
 
+  function createCatalogItem(index: number) {
+    const line = receipt?.lines[index];
+    if (!line) return;
+    const suggestedItem = suggestCatalogItemFromLine(line);
+    if (!suggestedItem) {
+      setError("The receipt line does not contain enough text to create a catalog option.");
+      return;
+    }
+
+    let nextId = suggestedItem.id;
+    let suffix = 2;
+    while (catalogItems.some((catalogItem) => catalogItem.id === nextId)) {
+      nextId = `${suggestedItem.id}-${suffix}`;
+      suffix += 1;
+    }
+    const createdItem = { ...suggestedItem, id: nextId };
+    const nextCatalogItems = [...catalogItems, createdItem];
+    setCatalogItems(nextCatalogItems);
+    persistCustomCatalog(nextCatalogItems);
+    setLineEdits((current) => ({
+      ...current,
+      [index]: { ...current[index], catalogId: createdItem.id, manual: true },
+    }));
+    setStatus(`Saved ${createdItem.name} as a new item option`);
+  }
+
   function chooseCatalogItem(index: number, catalogId: string) {
+    if (catalogId === "__create_new_item__") {
+      createCatalogItem(index);
+      return;
+    }
     setLineEdits((current) => ({
       ...current,
       [index]: {
@@ -560,6 +631,7 @@ export default function CaptureView() {
 
   const reconciliation = receipt ? getReconciliation(receipt) : null;
   const isReconciled = receipt != null && reconciliation != null && receiptIsReconciled(receipt, reconciliation);
+  const unidentifiedCount = receipt?.lines.reduce((count, line, index) => count + (getReviewLine(line, index, lineEdits, catalogItems).item ? 0 : 1), 0) ?? 0;
   const averageConfidence = receipt?.lines.length
     ? Math.round(receipt.lines.reduce((sum, line) => sum + line.confidence, 0) / receipt.lines.length)
     : 0;
@@ -602,8 +674,9 @@ export default function CaptureView() {
           <div className="totals"><div className="total-primary"><span>Total paid</span><strong>{themeMoney(receipt.total ?? receipt.balance)}</strong><small>{receipt.total != null ? "Receipt total" : "Balance captured from receipt"}</small></div><div><span>Subtotal</span><strong>{themeMoney(receipt.subtotal)}</strong><small>After discounts</small></div><div><span>Tax</span><strong>{themeMoney(receipt.tax)}</strong><small>Applied at checkout</small></div></div>
           <div className={`receipt-status ${isReconciled ? "is-reconciled" : "is-review"}`} role="status"><span className="receipt-status-mark" aria-hidden="true">{isReconciled ? "✓" : "!"}</span><div><strong>{isReconciled ? "Receipt totals reconcile" : "Review recommended"}</strong><p>{isReconciled ? `${receipt.lines.length} products, ${couponCount(receipt)} coupons, and tax are accounted for.` : "Some receipt values still need confirmation before this purchase is used."}</p></div>{receipt.warnings.length > 0 && <details className="review-details"><summary>{receipt.warnings.length} review {receipt.warnings.length === 1 ? "note" : "notes"}</summary><ul>{receipt.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul></details>}</div>
           <div className="line-table"><div className="table-head"><span>Product</span><span>Amount bought</span><span>Receipt amount</span><span>Review</span></div>{receipt.lines.map((line, index) => {
-            const reviewLine = getReviewLine(line, index, lineEdits);
+            const reviewLine = getReviewLine(line, index, lineEdits, catalogItems);
             const selectedUnitList = reviewLine.item ? `unit-options-${index}` : undefined;
+            const suggestedCatalogItem = !reviewLine.item ? suggestCatalogItemFromLine(line) : null;
             const matchLabel = reviewLine.manual ? "Manual" : reviewLine.needsReview ? "Review" : `${Math.round(line.confidence)}%`;
             const matchClass = reviewLine.manual || !reviewLine.needsReview ? "good-confidence" : "review-confidence";
             return <div className="table-row" key={`${line.rawText}-${index}`}>
@@ -611,7 +684,8 @@ export default function CaptureView() {
                 <span className="select-shell item-select-shell">
                   <select className="line-select item-select" aria-label={`Item for ${line.rawText}`} value={reviewLine.item?.id ?? ""} onChange={(event) => chooseCatalogItem(index, event.target.value)}>
                     <option value="">Unidentified item</option>
-                    {benchmarkGroceryCatalog.map((catalogItem) => <option value={catalogItem.id} key={catalogItem.id}>{catalogItem.name}</option>)}
+                    {!reviewLine.item && <option value="__create_new_item__">Create “{suggestedCatalogItem?.name ?? "new item"}” option…</option>}
+                    {catalogItems.map((catalogItem) => <option value={catalogItem.id} key={catalogItem.id}>{catalogItem.name}</option>)}
                   </select>
                   <span aria-hidden="true">⌄</span>
                 </span>
@@ -637,7 +711,7 @@ export default function CaptureView() {
             <div className="reconciliation-summary" aria-label="Subtotal calculation"><div className="reconciliation-heading"><span>Receipt math</span><strong className={isReconciled ? "reconciliation-ok" : "reconciliation-discount"}>{isReconciled ? "✓ Totals reconcile" : "Review totals"}</strong></div><div className="reconciliation-grid"><div><span>Product total</span><strong>{themeMoney(reconciliation?.productTotal ?? null)}</strong><small>Before coupons</small></div><div><span>Coupons / discounts</span><strong className="reconciliation-discount">{(reconciliation?.discountTotal ?? 0) > 0 ? `−${themeMoney(reconciliation?.discountTotal ?? 0)}` : themeMoney(0)}</strong><small>Applied to product total</small></div>{(reconciliation?.bagFee ?? 0) > 0 && <div><span>Paper bags</span><strong>{themeMoney(reconciliation?.bagFee ?? 0)}</strong><small>Assumed at $0.05 each</small></div>}<div><span>Calculated subtotal</span><strong>{themeMoney(reconciliation?.calculatedSubtotal ?? null)}</strong><small>Product total minus coupons and bags</small></div></div></div>
           </div>
           <details className="raw-details"><summary>Developer details · raw OCR and report tools</summary><div className="developer-actions"><button className="quiet-button" type="button" onClick={() => void copyDevReport()}>{reportCopied ? "Report copied" : "Copy full Markdown report"}<span aria-hidden="true">↗</span></button></div><pre>{rawText || "No transcribed receipt text returned."}</pre></details>
-          <PurchaseAnalysis receiptSource={receiptSource} />
+          <PurchaseAnalysis receiptSource={receiptSource} catalogItems={catalogItems} unidentifiedCount={unidentifiedCount} />
         </>}
       </div>
     </section>

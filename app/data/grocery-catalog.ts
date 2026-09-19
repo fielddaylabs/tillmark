@@ -118,12 +118,12 @@ function scoreAlias(searchText: string, alias: string) {
   return 50 + aliasTokens.length * 10 + normalizedAlias.length / 100;
 }
 
-export function matchCatalogItem(rawText: string, description: string | null) {
+export function matchCatalogItem(rawText: string, description: string | null, catalogItems: readonly GroceryCatalogItem[] = benchmarkGroceryCatalog) {
   const searchText = normalizeSearchText(`${rawText} ${description ?? ""}`);
   if (!searchText) return null;
 
   let best: { item: GroceryCatalogItem; score: number } | null = null;
-  for (const catalogItem of benchmarkGroceryCatalog) {
+  for (const catalogItem of catalogItems) {
     for (const alias of catalogItem.aliases) {
       const score = scoreAlias(searchText, alias);
       if (!best || score > best.score) best = { item: catalogItem, score };
@@ -133,9 +133,9 @@ export function matchCatalogItem(rawText: string, description: string | null) {
   return best && best.score >= 70 ? best.item : null;
 }
 
-export function catalogifyReceiptLines<T extends { rawText: string; description: string | null; category: string | null; unit: string | null }>(lines: T[]) {
+export function catalogifyReceiptLines<T extends { rawText: string; description: string | null; category: string | null; unit: string | null }>(lines: T[], catalogItems: readonly GroceryCatalogItem[] = benchmarkGroceryCatalog) {
   return lines.map((line) => {
-    const catalogItem = matchCatalogItem(line.rawText, line.description);
+    const catalogItem = matchCatalogItem(line.rawText, line.description, catalogItems);
     if (!catalogItem) return line;
     return {
       ...line,
@@ -146,6 +146,64 @@ export function catalogifyReceiptLines<T extends { rawText: string; description:
   });
 }
 
-export function findCatalogItem(id: string | null | undefined) {
-  return id ? benchmarkGroceryCatalog.find((catalogItem) => catalogItem.id === id) ?? null : null;
+export function findCatalogItem(id: string | null | undefined, catalogItems: readonly GroceryCatalogItem[] = benchmarkGroceryCatalog) {
+  return id ? catalogItems.find((catalogItem) => catalogItem.id === id) ?? null : null;
+}
+
+const ignoredSuggestionTokens = new Set(["a", "c", "f", "n", "o", "t", "x", "id", "pc", "ct", "pk", "pack", "cn", "case"]);
+const brandSuggestionTokens = new Set([
+  "aldi", "amys", "bertolli", "breyers", "chobani", "coke", "clancys", "feel", "foods", "goya", "gilliam", "good",
+  "helman", "naked", "one", "oreo", "russo", "shoprite", "sonoma", "srbb", "srpb", "tenderin", "udis", "wpo",
+]);
+const suggestionReplacements: Record<string, string> = {
+  citz: "cider",
+  cit: "cider",
+  cid: "cider",
+  drsng: "dressing",
+  hrt: "heart",
+  hts: "hearts",
+  mayo: "mayonnaise",
+  mozz: "mozzarella",
+  mushrms: "mushrooms",
+  pepp: "pepper",
+  tom: "tomato",
+  veg: "vegetable",
+};
+
+function titleCase(value: string) {
+  return value.replace(/\b\w/g, (character) => character.toUpperCase());
+}
+
+function suggestionUnits(rawText: string, description: string | null) {
+  const source = `${rawText} ${description ?? ""}`.toLowerCase();
+  if (/\b\d*\s*(?:pk|pack)\b/.test(source)) return { units: ["pack", "each", "oz"], defaultUnit: "pack" };
+  if (/\b(?:cn|can|cans)\b/.test(source)) return { units: ["can", "pack", "oz"], defaultUnit: "can" };
+  if (/\blb\b/.test(source)) return { units: ["lb", "package", "oz"], defaultUnit: "lb" };
+  if (/\boz\b/.test(source)) return { units: ["oz", "package", "lb"], defaultUnit: "oz" };
+  return { units: ["package", "each", "oz", "lb"], defaultUnit: "package" };
+}
+
+export function suggestCatalogItemFromLine(line: { rawText: string; description: string | null; category?: string | null }) {
+  const source = line.description || line.rawText;
+  const tokens = normalizeSearchText(source)
+    .split(" ")
+    .filter((token) => token && !/^\d+$/.test(token) && !ignoredSuggestionTokens.has(token) && !brandSuggestionTokens.has(token))
+    .map((token) => suggestionReplacements[token] ?? token);
+  const uniqueTokens = [...new Set(tokens)];
+  if (!uniqueTokens.length) return null;
+
+  let name = uniqueTokens.join(" ");
+  if (uniqueTokens.includes("cider") && uniqueTokens.includes("dry")) name = "dry cider";
+  if (uniqueTokens.includes("cider") && uniqueTokens.length === 1) name = "cider";
+
+  const units = suggestionUnits(line.rawText, line.description);
+  const category = line.category ? titleCase(line.category) : "Grocery";
+  return {
+    id: `custom-${normalizeSearchText(name).replace(/\s+/g, "-") || "item"}`,
+    name: titleCase(name),
+    category,
+    units: units.units,
+    defaultUnit: units.defaultUnit,
+    aliases: [...new Set([name, line.rawText, line.description].filter((value): value is string => Boolean(value)))],
+  } satisfies GroceryCatalogItem;
 }
