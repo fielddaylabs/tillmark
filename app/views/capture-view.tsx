@@ -200,6 +200,23 @@ function catalogifyReceiptAndLearn(receipt: Receipt, catalogItems: readonly Groc
   };
 }
 
+function mergeRefinedReceipt(firstReceipt: Receipt, refinedReceipt: Receipt) {
+  const usedRefinedIndexes = new Set<number>();
+  const lines = firstReceipt.lines.map((firstLine, firstIndex) => {
+    if (!lineNeedsReview(firstLine)) return firstLine;
+
+    const firstSignature = stackLineSignature(firstLine);
+    let refinedIndex = refinedReceipt.lines.findIndex((refinedLine, index) => !usedRefinedIndexes.has(index) && stackLineSignature(refinedLine) === firstSignature);
+    if (refinedIndex < 0 && firstIndex < refinedReceipt.lines.length && !usedRefinedIndexes.has(firstIndex)) refinedIndex = firstIndex;
+    if (refinedIndex < 0) return firstLine;
+
+    usedRefinedIndexes.add(refinedIndex);
+    return refinedReceipt.lines[refinedIndex];
+  });
+
+  return { ...refinedReceipt, lines };
+}
+
 function stackLineSignature(line: ReceiptLine) {
   return `${line.rawText} ${line.description ?? ""}`
     .toLowerCase()
@@ -642,7 +659,8 @@ export default function CaptureView() {
       setStatus("Reading enhanced image...");
       const firstPass = await requestReceipt("fast");
       if (requestId !== scanRequestRef.current) return;
-      applyReceiptCatalog(firstPass.receipt);
+      const firstReceipt = firstPass.receipt;
+      applyReceiptCatalog(firstReceipt);
       setReceiptSource(source);
       setRawText(firstPass.rawText);
 
@@ -657,7 +675,7 @@ export default function CaptureView() {
       setStatus("Still improving this scan...");
       const refinedPass = await requestReceipt("refine");
       if (requestId !== scanRequestRef.current) return;
-      applyReceiptCatalog(refinedPass.receipt);
+      applyReceiptCatalog(mergeRefinedReceipt(firstReceipt, refinedPass.receipt));
       setRawText(refinedPass.rawText);
       setRefining(false);
       setScanPhase("complete");
